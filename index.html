@@ -272,8 +272,27 @@
   </div>
 </div>
 
+<!-- ================= SET PASSWORD (after accepting an invite, or a password reset link) ================= -->
+<div id="set-password-view" style="display:none; min-height:100vh; align-items:center; justify-content:center; background: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px), var(--bg); background-size:28px 28px;">
+  <div class="login-card">
+    <h1>Set your password</h1>
+    <p class="sub">You're verified, you just need to choose a password before you can log in.</p>
+    <div class="field">
+      <label for="set-password-1">New password</label>
+      <input id="set-password-1" type="password" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="set-password-2">Confirm password</label>
+      <input id="set-password-2" type="password" autocomplete="new-password">
+    </div>
+    <button class="btn btn-block" id="set-password-btn">Set password and continue</button>
+    <div class="error-text" id="set-password-error" style="display:none;"></div>
+  </div>
+</div>
+
 <!-- ================= APP ================= -->
 <div id="app-view">
+
   <header class="topbar">
     <div class="brand">
       <span class="mark"></span>
@@ -401,7 +420,17 @@
 const SUPABASE_URL = 'https://ykddpajaqftrcmmhizoq.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_Y-Jzj8i4_FDJeg6pRSOkpw_p7q1BGlE';
 
+// Capture this BEFORE the Supabase client processes the URL (it clears the
+// hash once it reads it). This tells us whether the person just arrived here
+// by clicking an invite link or a "forgot password" link, as opposed to a
+// normal return visit, so we know whether to ask them to set a password
+// before letting them into the app.
+const AUTH_LINK_TYPE = new URLSearchParams(
+  window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash
+).get('type'); // 'invite' | 'recovery' | null
+
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 
 /* ============================================================================
    STATE
@@ -1052,11 +1081,56 @@ function renderSubmissions(){
 }
 
 /* ============================================================================
+   SET PASSWORD (invite / password-reset landing)
+   ============================================================================ */
+document.getElementById('set-password-btn').addEventListener('click', async ()=>{
+  const p1 = document.getElementById('set-password-1').value;
+  const p2 = document.getElementById('set-password-2').value;
+  const errEl = document.getElementById('set-password-error');
+  errEl.style.display = 'none';
+
+  if(p1.length < 8){
+    errEl.textContent = 'Password must be at least 8 characters.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if(p1 !== p2){
+    errEl.textContent = "Those two passwords don't match.";
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if(error){
+    errEl.textContent = error.message;
+    errEl.style.display = 'block';
+    return;
+  }
+
+  // Clean the invite/recovery token out of the URL so refreshing this page
+  // later doesn't try to replay it.
+  window.history.replaceState(null, '', window.location.pathname);
+  document.getElementById('set-password-view').style.display = 'none';
+  await boot();
+});
+
+/* ============================================================================
    INIT
    ============================================================================ */
 (async function init(){
   const { data: { session } } = await sb.auth.getSession();
-  if(session) await boot();
+  if(!session) return; // stays on the login screen
+
+  if(AUTH_LINK_TYPE === 'invite' || AUTH_LINK_TYPE === 'recovery'){
+    // They clicked an invite or "forgot password" link. They're technically
+    // authenticated already, but haven't chosen a password yet, so send
+    // them to that screen instead of straight into the app.
+    document.getElementById('login-view').style.display = 'none';
+    document.getElementById('set-password-view').style.display = 'flex';
+    return;
+  }
+
+  await boot();
 })();
 </script>
 </body>
