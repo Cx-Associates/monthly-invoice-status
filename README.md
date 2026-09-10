@@ -82,6 +82,80 @@ behind everything below.
 
 ---
 
+## A bug that was fixed after the first version of this tool
+
+If you set this up before this note was added, you likely hit this: logging
+in showed "Your account isn't set up in this tool yet," even for a properly
+configured admin account, and the browser's own error console showed a
+`500 (Internal Server Error)` coming from the `people` table specifically.
+
+The cause: the original permission rules checked "is this person an admin"
+by looking inside the `people` table, but that check was itself one of the
+rules governing the `people` table, so checking it triggered the same check
+again, endlessly, until the database gave up. This is a well-known category
+of mistake in this kind of permission system (an "infinite recursion" in the
+security rules), not something specific to your setup, and it went unnoticed
+initially because SQL run directly in Supabase's own editor skips these
+rules entirely, only the actual app is affected.
+
+**If you already ran an earlier version of `schema.sql`**, fix it by running
+this once in the SQL Editor (safe to run even if you're not sure whether
+you're affected):
+
+```sql
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select coalesce((select is_admin from people where id = auth.uid()), false);
+$$;
+
+drop policy if exists people_admin_write on people;
+create policy people_admin_write on people
+  for all using (is_admin()) with check (is_admin());
+
+drop policy if exists aliases_admin_write on name_aliases;
+create policy aliases_admin_write on name_aliases
+  for all using (is_admin()) with check (is_admin());
+
+drop policy if exists pm_admin_insert on project_months;
+create policy pm_admin_insert on project_months
+  for insert with check (is_admin());
+
+drop policy if exists pm_admin_delete on project_months;
+create policy pm_admin_delete on project_months
+  for delete using (is_admin());
+
+drop policy if exists pm_update on project_months;
+create policy pm_update on project_months
+  for update
+  using (
+    is_admin()
+    or exists (
+      select 1 from name_aliases na
+      where na.person_id = auth.uid()
+        and lower(na.alias) in (lower(pm_name_raw), lower(mc_name_raw), lower(bm_name_raw))
+    )
+  )
+  with check (true);
+
+drop policy if exists runs_admin on import_runs;
+create policy runs_admin on import_runs
+  for all using (is_admin()) with check (is_admin());
+
+drop policy if exists errors_admin on import_errors;
+create policy errors_admin on import_errors
+  for all using (is_admin()) with check (is_admin());
+```
+
+**If you're setting this up fresh**, this is already fixed in the current
+`schema.sql`, you don't need to do anything extra.
+
+---
+
 ## 1. Set up Supabase
 
 You can reuse your existing Supabase project (`ykddpajaqftrcmmhizoq`) or
@@ -171,10 +245,18 @@ see everything, plus the Import, People & aliases, and Submissions tabs.
   and even then, a database trigger silently discards any attempt to change
   the Ajera-sourced financial fields, so the UI being tampered with
   client-side can't do anything the database wouldn't already reject.
-- **Monthly re-import:** matches by Project ID. Ajera-sourced fields
-  (Contract, Billed, Spent, Spend Remaining, Bill Remaining, WIP, and the
-  PM/MC/BM names themselves) get refreshed; Requested Bill Amount, Action,
-  Notes, and Reviewed status are never touched by an import once set.
+- **Monthly re-import:** matches by Project ID, and reads directly from
+  Ajera's raw export, no manual prep or reformatting needed first. Imported
+  fields (Contract, Billed, Spent, Project Status, WIP, and the PM/MC/BM
+  names themselves) get refreshed; Requested Bill Amount, Action, Notes, and
+  Reviewed status are never touched by an import once set.
+- **Spend Remaining and Bill Remaining are computed, not imported.** Both
+  are confirmed to be plain subtraction in Ajera (Contract minus Spent,
+  Contract minus Billed), so the tool calculates them itself from the
+  imported Contract/Billed/Spent figures rather than reading them as their
+  own columns. This is deliberate: it means a future header rename or
+  wording change in Ajera's export (which has already happened once) can't
+  silently break these two fields the way it did before this was added.
 - **Projects that disappear from an export:** not deleted; they're left in
   place from the prior import, so nothing vanishes without you noticing.
   (A note: the tool doesn't currently auto-flag "this project vanished this

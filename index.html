@@ -835,13 +835,12 @@ const EXPECTED_HEADERS = {
   'Total Contract Amount':'total_contract_amount',
   'Billed':'billed',
   'Spent':'spent',
-  // Ajera's raw export and the older manually-prepared workbook have used
-  // slightly different text for this column; both are accepted so either
-  // file works without editing headers by hand.
-  'Spend Remaining (Contract minus Spent)':'spend_remaining',
-  'Spend Remaining':'spend_remaining',
-  'Bill Remaining (Contract minus Billed)':'bill_remaining',
   'WIP':'wip',
+  // Spend Remaining and Bill Remaining are deliberately NOT read from the
+  // file. Both are confirmed to be plain subtraction in Ajera (Contract
+  // minus Spent, Contract minus Billed), so they're computed below instead
+  // of imported, which means a header rename or a stale cached formula
+  // value in the export can never desync them from Contract/Billed/Spent.
 };
 const NUMERIC_FIELDS = ['total_contract_amount','billed','spent','spend_remaining','bill_remaining','wip'];
 const IGNORABLE_NAMES = ['no marketing contact','n/a','none',''];
@@ -910,6 +909,9 @@ document.getElementById('import-file').addEventListener('change', async e=>{
       }
       rec[field] = v ?? null;
     });
+    // Computed, not imported — see the note above EXPECTED_HEADERS.
+    rec.spend_remaining = (rec.total_contract_amount || 0) - (rec.spent || 0);
+    rec.bill_remaining = (rec.total_contract_amount || 0) - (rec.billed || 0);
     records.push(rec);
   }
 
