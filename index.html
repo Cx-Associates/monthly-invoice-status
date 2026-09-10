@@ -325,6 +325,7 @@
         <div class="sep"></div>
         <select id="bm-filter"><option value="">Billing manager: all</option></select>
         <label class="checkbox-filter"><input type="checkbox" id="wip-filter"> Has any WIP</label>
+        <label class="checkbox-filter"><input type="checkbox" id="active-filter" checked> Active projects only</label>
         <input type="text" id="search-filter" placeholder="Search project, client...">
       </div>
 
@@ -417,8 +418,8 @@
    access is enforced by the RLS policies in schema.sql, not by keeping
    this key secret.
    ============================================================================ */
-const SUPABASE_URL = 'https://ykddpajaqftrcmmhizoq.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_Y-Jzj8i4_FDJeg6pRSOkpw_p7q1BGlE';
+const SUPABASE_URL = 'https://YOUR-PROJECT-REF.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
 
 // Capture this BEFORE the Supabase client processes the URL (it clears the
 // hash once it reads it). This tells us whether the person just arrived here
@@ -447,6 +448,7 @@ let state = {
   scope: 'mine',          // 'mine' | 'all'
   bmFilter: '',
   wipOnly: false,
+  activeOnly: true,
   search: '',
   sortKey: 'project_id',
   sortDir: 1,
@@ -619,6 +621,7 @@ function wireFilters(){
   });
   document.getElementById('bm-filter').addEventListener('change', e=>{ state.bmFilter = e.target.value; renderTable(); });
   document.getElementById('wip-filter').addEventListener('change', e=>{ state.wipOnly = e.target.checked; renderTable(); });
+  document.getElementById('active-filter').addEventListener('change', e=>{ state.activeOnly = e.target.checked; renderTable(); });
   document.getElementById('search-filter').addEventListener('input', e=>{ state.search = e.target.value.toLowerCase(); renderTable(); });
 }
 
@@ -650,6 +653,7 @@ function visibleRows(){
   }
   if(state.bmFilter) rows = rows.filter(r => r.bm_name_raw === state.bmFilter);
   if(state.wipOnly) rows = rows.filter(r => (r.wip || 0) > 0);
+  if(state.activeOnly) rows = rows.filter(r => !r.project_status || r.project_status.toLowerCase() === 'active');
   if(state.search){
     const s = state.search;
     rows = rows.filter(r =>
@@ -730,7 +734,7 @@ function renderTopPanel(row){
       <div class="panel-head">
         <div class="titles">
           <h2>${row.project_id} — ${row.description || ''}</h2>
-          <div class="meta"><b>${row.client || ''}</b> · PM: ${row.pm_name_raw||'—'} · MC: ${row.mc_name_raw||'—'} · BM: ${row.bm_name_raw||'—'}</div>
+          <div class="meta"><b>${row.client || ''}</b>${row.project_status ? ' · ' + row.project_status : ''} · PM: ${row.pm_name_raw||'—'} · MC: ${row.mc_name_raw||'—'} · BM: ${row.bm_name_raw||'—'}</div>
         </div>
         <span class="reviewed-pill ${row.reviewed ? 'yes':'no'}">${row.reviewed ? 'Reviewed' : 'Not yet reviewed'}</span>
       </div>
@@ -827,13 +831,19 @@ const EXPECTED_HEADERS = {
   'Project Manager':'pm_name_raw',
   'Marketing Contact':'mc_name_raw',
   'Billing Manager':'bm_name_raw',
+  'Project Status':'project_status',
   'Total Contract Amount':'total_contract_amount',
   'Billed':'billed',
   'Spent':'spent',
+  // Ajera's raw export and the older manually-prepared workbook have used
+  // slightly different text for this column; both are accepted so either
+  // file works without editing headers by hand.
+  'Spend Remaining (Contract minus Spent)':'spend_remaining',
   'Spend Remaining':'spend_remaining',
   'Bill Remaining (Contract minus Billed)':'bill_remaining',
   'WIP':'wip',
 };
+const NUMERIC_FIELDS = ['total_contract_amount','billed','spent','spend_remaining','bill_remaining','wip'];
 const IGNORABLE_NAMES = ['no marketing contact','n/a','none',''];
 
 document.getElementById('import-file').addEventListener('change', async e=>{
@@ -845,7 +855,31 @@ document.getElementById('import-file').addEventListener('change', async e=>{
 
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, {type:'array'});
-  const sheetName = wb.SheetNames.find(n => n.toLowerCase() !== 'drop down list') || wb.SheetNames[0];
+  const nonDropdownSheets = wb.SheetNames.filter(n => n.trim().toLowerCase() !== 'drop down list');
+
+  // Match the sheet name to the month you picked (e.g. "August 2026" or
+  // "Aug 2026"), rather than blindly grabbing the first tab in the file.
+  // This matters because a workbook with every month's tab in it (like the
+  // original export) would otherwise always import whichever tab happens to
+  // be first, silently, regardless of which month you selected above.
+  const [y, m] = monthInput.split('-').map(Number);
+  const monthAsDate = new Date(y, m - 1, 1);
+  const candidates = [
+    monthAsDate.toLocaleDateString('en-US', {month:'long', year:'numeric'}),  // "August 2026"
+    monthAsDate.toLocaleDateString('en-US', {month:'short', year:'numeric'}), // "Aug 2026"
+  ].map(s => s.toLowerCase());
+
+  let sheetName = nonDropdownSheets.find(n => candidates.includes(n.trim().toLowerCase()));
+  if(!sheetName){
+    if(nonDropdownSheets.length === 1){
+      sheetName = nonDropdownSheets[0]; // only one real tab, safe to assume it's the right one
+    } else {
+      toast(`Couldn't find a tab named "${candidates[0]}" or "${candidates[1]}" in this file, and it has more than one tab, so I can't guess which one you meant. Upload a file with just this month's tab, or rename that tab to match, and try again.`, true);
+      e.target.value = '';
+      return;
+    }
+  }
+
   const sheet = wb.Sheets[sheetName];
   const raw = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null});
 
@@ -867,9 +901,9 @@ document.getElementById('import-file').addEventListener('change', async e=>{
     Object.entries(colIndex).forEach(([field, idx])=>{
       if(field === 'project_id') return;
       let v = r[idx];
-      if(typeof v === 'number' && ['total_contract_amount','billed','spent','spend_remaining','bill_remaining','wip'].includes(field)){
+      if(typeof v === 'number' && NUMERIC_FIELDS.includes(field)){
         // numeric already
-      } else if(['total_contract_amount','billed','spent','spend_remaining','bill_remaining','wip'].includes(field)){
+      } else if(NUMERIC_FIELDS.includes(field)){
         v = parseFloat(v) || 0;
       } else if(typeof v === 'string'){
         v = v.trim();
@@ -909,6 +943,7 @@ async function runImport(records, monthDate){
     const ajeraFields = {
       description: rec.description, client: rec.client,
       pm_name_raw: rec.pm_name_raw, mc_name_raw: rec.mc_name_raw, bm_name_raw: rec.bm_name_raw,
+      project_status: rec.project_status,
       total_contract_amount: rec.total_contract_amount, billed: rec.billed, spent: rec.spent,
       spend_remaining: rec.spend_remaining, bill_remaining: rec.bill_remaining, wip: rec.wip,
       active: true,
