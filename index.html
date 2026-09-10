@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monthly Invoice Status — Cx Associates</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#EEF1F4;
+    --panel:#FFFFFF;
+    --ink:#16233F;
+    --ink-soft:#4C5A73;
+    --ink-faint:#8592A6;
+    --line:#D7DCE3;
+    --line-soft:#E7EAEE;
+    --accent:#1F6F78;
+    --accent-soft:#E4F1F0;
+    --warn:#C77D2E;
+    --warn-soft:#FBEEDF;
+    --danger:#B23A48;
+    --danger-soft:#F8E7E9;
+    --good:#2E7D5B;
+    --good-soft:#E7F3EC;
+    --radius:5px;
+    --font-ui:'Inter',system-ui,-apple-system,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font-ui);
+    font-size:14px;
+    line-height:1.5;
+  }
+  button{font-family:inherit;font-size:inherit;cursor:pointer;}
+  input,select,textarea{font-family:inherit;font-size:inherit;}
+  ::selection{background:var(--accent-soft);}
+
+  /* ---------- Login ---------- */
+  #login-view{
+    min-height:100vh;display:flex;align-items:center;justify-content:center;
+    background:
+      linear-gradient(var(--line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-soft) 1px, transparent 1px),
+      var(--bg);
+    background-size:28px 28px;
+  }
+  .login-card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:36px 34px;width:340px;box-shadow:0 1px 2px rgba(22,35,63,0.06);
+  }
+  .login-card h1{font-size:19px;margin:0 0 2px;font-weight:700;letter-spacing:-0.01em;}
+  .login-card .sub{color:var(--ink-soft);font-size:13px;margin:0 0 22px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:5px;}
+  .field input,.field select,.field textarea{
+    width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:4px;
+    background:#fff;color:var(--ink);
+  }
+  .field textarea{resize:vertical;min-height:64px;font-family:var(--font-ui);}
+  .field input:focus,.field select:focus,.field textarea:focus,button:focus-visible{
+    outline:2px solid var(--accent);outline-offset:1px;
+  }
+  .btn{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:9px 16px;border-radius:4px;border:1px solid var(--accent);
+    background:var(--accent);color:#fff;font-weight:600;font-size:13px;
+  }
+  .btn:hover{background:#195961;}
+  .btn.secondary{background:#fff;color:var(--ink);border-color:var(--line);}
+  .btn.secondary:hover{background:var(--line-soft);}
+  .btn.danger{background:#fff;color:var(--danger);border-color:var(--danger);}
+  .btn.danger:hover{background:var(--danger-soft);}
+  .btn:disabled{opacity:0.45;cursor:not-allowed;}
+  .btn-block{width:100%;justify-content:center;}
+  .error-text{color:var(--danger);font-size:12.5px;margin-top:10px;}
+  .hint-link{background:none;border:none;color:var(--accent-soft ? var(--accent):var(--accent));font-size:12.5px;padding:0;margin-top:12px;text-decoration:underline;}
+
+  /* ---------- App shell ---------- */
+  #app-view{display:none;min-height:100vh;flex-direction:column;}
+  header.topbar{
+    background:var(--panel);border-bottom:1px solid var(--line);
+    padding:12px 22px;display:flex;align-items:center;justify-content:space-between;
+    position:sticky;top:0;z-index:20;
+  }
+  .brand{display:flex;align-items:baseline;gap:10px;}
+  .brand .mark{
+    width:9px;height:9px;background:var(--accent);border-radius:1px;display:inline-block;
+    transform:rotate(45deg);
+  }
+  .brand h1{font-size:15px;margin:0;font-weight:700;letter-spacing:-0.01em;}
+  .brand .tag{font-size:12px;color:var(--ink-faint);}
+  .who{display:flex;align-items:center;gap:14px;font-size:13px;}
+  .who .name{font-weight:600;}
+  .who .role-pill{
+    font-size:11px;padding:2px 7px;border-radius:20px;background:var(--accent-soft);color:var(--accent);
+    font-weight:600;
+  }
+
+  nav.tabs{
+    display:flex;gap:2px;padding:0 22px;background:var(--panel);border-bottom:1px solid var(--line);
+  }
+  nav.tabs button{
+    background:none;border:none;padding:11px 14px;font-size:13px;color:var(--ink-soft);
+    border-bottom:2px solid transparent;font-weight:500;
+  }
+  nav.tabs button.active{color:var(--ink);border-bottom-color:var(--accent);font-weight:600;}
+  nav.tabs button:hover{color:var(--ink);}
+
+  main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+  .view{display:none;flex:1;overflow:auto;}
+  .view.active{display:flex;flex-direction:column;}
+
+  /* ---------- Review view: top panel / bottom table ---------- */
+  #review-view{flex:1;min-height:0;}
+  .review-top{
+    flex:0 0 62%;overflow:auto;padding:20px 22px 14px;border-bottom:1px solid var(--line);
+    background:var(--bg);
+  }
+  .review-bottom{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--panel);}
+
+  .filters{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px 22px;border-bottom:1px solid var(--line-soft);background:var(--panel);
+  }
+  .filters .sep{width:1px;height:20px;background:var(--line);margin:0 4px;}
+  .filters select,.filters input[type=text]{
+    padding:6px 9px;border:1px solid var(--line);border-radius:4px;font-size:12.5px;background:#fff;
+  }
+  .chip-toggle{display:flex;gap:0;border:1px solid var(--line);border-radius:4px;overflow:hidden;}
+  .chip-toggle button{
+    background:#fff;border:none;padding:6px 12px;font-size:12.5px;color:var(--ink-soft);font-weight:500;
+  }
+  .chip-toggle button.active{background:var(--accent);color:#fff;}
+  .checkbox-filter{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);}
+
+  .empty-state{
+    padding:50px 20px;text-align:center;color:var(--ink-faint);font-size:13.5px;
+  }
+
+  .panel-card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px 22px;
+  }
+  .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;}
+  .panel-head .titles h2{margin:0 0 2px;font-size:17px;font-weight:700;letter-spacing:-0.01em;}
+  .panel-head .titles .meta{font-size:12.5px;color:var(--ink-soft);}
+  .panel-head .meta b{color:var(--ink);}
+  .reviewed-pill{
+    display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+    padding:4px 10px;border-radius:20px;
+  }
+  .reviewed-pill.yes{background:var(--good-soft);color:var(--good);}
+  .reviewed-pill.no{background:var(--warn-soft);color:var(--warn);}
+
+  .stat-grid{
+    display:grid;grid-template-columns:repeat(6,1fr);gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:4px;overflow:hidden;
+    margin-bottom:18px;
+  }
+  .stat-tile{background:#fff;padding:12px 12px;}
+  .stat-tile .lbl{font-size:11px;color:var(--ink-soft);margin-bottom:5px;}
+  .stat-tile .val{font-family:var(--font-mono);font-size:16px;font-weight:600;}
+  .stat-tile.negative .val{color:var(--danger);}
+  .stat-tile.wip .val{color:var(--accent);}
+
+  .chart-row{display:flex;gap:22px;margin-bottom:18px;align-items:flex-end;}
+  .chart-wrap{flex:0 0 260px;}
+  .chart-legend{flex:1;display:flex;gap:18px;flex-wrap:wrap;padding-bottom:6px;}
+  .chart-legend .li{font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;}
+  .chart-legend .sw{width:9px;height:9px;border-radius:2px;}
+
+  .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .edit-grid .full{grid-column:1/-1;}
+  fieldset.locked{opacity:0.55;}
+  .locked-note{font-size:12px;color:var(--ink-faint);margin-top:2px;}
+
+  table.data-table{width:100%;border-collapse:collapse;font-size:12.8px;}
+  table.data-table thead th{
+    text-align:left;font-weight:600;color:var(--ink-soft);font-size:11.5px;
+    padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel);
+    position:sticky;top:0;cursor:pointer;white-space:nowrap;
+  }
+  table.data-table thead th:hover{color:var(--ink);}
+  table.data-table tbody td{padding:8px 14px;border-bottom:1px solid var(--line-soft);white-space:nowrap;}
+  table.data-table tbody tr{cursor:pointer;}
+  table.data-table tbody tr:hover{background:var(--accent-soft);}
+  table.data-table tbody tr.selected{background:var(--accent-soft);}
+  table.data-table .num{font-family:var(--font-mono);text-align:right;}
+  .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;}
+  .status-dot.yes{background:var(--good);}
+  .status-dot.no{background:var(--warn);}
+  .flag-icon{color:var(--danger);font-weight:700;margin-left:5px;cursor:help;}
+  .table-scroll{flex:1;overflow:auto;}
+
+  /* ---------- Admin views ---------- */
+  .admin-view-inner{padding:22px;max-width:960px;}
+  .admin-view-inner h2{font-size:17px;margin:0 0 4px;}
+  .admin-view-inner .sub{color:var(--ink-soft);font-size:13px;margin:0 0 20px;}
+  .drop-zone{
+    border:1.5px dashed var(--line);border-radius:var(--radius);padding:30px;text-align:center;
+    background:var(--panel);margin-bottom:18px;
+  }
+  .drop-zone input[type=file]{margin-top:10px;}
+  .import-summary{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;
+    margin-bottom:18px;font-size:13px;
+  }
+  .import-summary .row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line-soft);}
+  .import-summary .row:last-child{border-bottom:none;}
+  .import-summary .n{font-family:var(--font-mono);font-weight:600;}
+
+  .people-list,.errors-list{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:20px;}
+  .list-row{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--line-soft);gap:12px;}
+  .list-row:last-child{border-bottom:none;}
+  .list-row .primary{font-weight:600;}
+  .list-row .secondary{font-size:12px;color:var(--ink-soft);}
+  .alias-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px;}
+  .alias-tag{
+    background:var(--accent-soft);color:var(--accent);font-size:11px;padding:2px 8px;border-radius:20px;
+  }
+  .inline-form{display:flex;gap:8px;padding:14px 16px;border-top:1px solid var(--line);background:var(--bg);}
+  .inline-form input,.inline-form select{flex:1;padding:7px 9px;border:1px solid var(--line);border-radius:4px;}
+
+  .submission-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;}
+  .sub-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;}
+  .sub-card .nm{font-weight:600;margin-bottom:6px;}
+  .sub-card .bar{height:6px;border-radius:3px;background:var(--line-soft);overflow:hidden;margin-bottom:6px;}
+  .sub-card .bar-fill{height:100%;background:var(--good);}
+  .sub-card .cnt{font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);}
+
+  .toast{
+    position:fixed;bottom:22px;right:22px;background:var(--ink);color:#fff;padding:11px 18px;
+    border-radius:5px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,0.18);z-index:100;
+    opacity:0;transform:translateY(6px);transition:opacity .18s,transform .18s;pointer-events:none;
+  }
+  .toast.show{opacity:1;transform:translateY(0);}
+  .toast.error{background:var(--danger);}
+
+  @media (max-width:900px){
+    .stat-grid{grid-template-columns:repeat(3,1fr);}
+    .edit-grid{grid-template-columns:1fr;}
+    .chart-row{flex-direction:column;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login-view">
+  <div class="login-card">
+    <h1>Monthly Invoice Status</h1>
+    <p class="sub">Cx Associates — project review before billing</p>
+    <div class="field">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password">
+    </div>
+    <button class="btn btn-block" id="login-btn">Sign in</button>
+    <div class="error-text" id="login-error" style="display:none;"></div>
+    <button class="hint-link" id="forgot-btn">Forgot password?</button>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app-view">
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark"></span>
+      <h1>Monthly Invoice Status</h1>
+      <span class="tag">Cx Associates</span>
+    </div>
+    <div class="who">
+      <select id="month-select" title="Month"></select>
+      <span class="name" id="who-name"></span>
+      <span class="role-pill" id="who-role"></span>
+      <button class="btn secondary" id="signout-btn">Sign out</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-view="review" class="active">Review</button>
+    <button data-view="import" class="admin-only">Import</button>
+    <button data-view="people" class="admin-only">People &amp; aliases</button>
+    <button data-view="submissions" class="admin-only">Submissions</button>
+  </nav>
+
+  <main>
+    <!-- ---------- Review ---------- -->
+    <section class="view active" id="review-view" style="flex-direction:column;">
+      <div class="filters">
+        <div class="chip-toggle" id="scope-toggle">
+          <button data-scope="mine" class="active">My projects</button>
+          <button data-scope="all">All projects</button>
+        </div>
+        <div class="sep"></div>
+        <select id="bm-filter"><option value="">Billing manager: all</option></select>
+        <label class="checkbox-filter"><input type="checkbox" id="wip-filter"> Has any WIP</label>
+        <input type="text" id="search-filter" placeholder="Search project, client...">
+      </div>
+
+      <div class="review-top" id="review-top">
+        <div class="empty-state">Select a project below to review it.</div>
+      </div>
+
+      <div class="review-bottom">
+        <div class="table-scroll">
+          <table class="data-table" id="project-table">
+            <thead>
+              <tr>
+                <th data-sort="project_id">Project</th>
+                <th data-sort="client">Client</th>
+                <th data-sort="pm_name_raw">PM</th>
+                <th data-sort="mc_name_raw">Marketing contact</th>
+                <th data-sort="bm_name_raw">Billing mgr</th>
+                <th data-sort="wip" class="num">WIP</th>
+                <th data-sort="bill_remaining" class="num">Bill remaining</th>
+                <th data-sort="action">Action</th>
+                <th data-sort="reviewed">Reviewed</th>
+              </tr>
+            </thead>
+            <tbody id="project-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- Import (admin) ---------- -->
+    <section class="view" id="import-view">
+      <div class="admin-view-inner">
+        <h2>Monthly import</h2>
+        <p class="sub">Upload this month's Ajera export. Existing financial figures refresh by Project ID; any Requested Bill Amount, Action, Notes, or Reviewed status already entered for the month is left untouched.</p>
+
+        <div class="drop-zone">
+          <div class="field" style="max-width:220px;margin:0 auto 14px;text-align:left;">
+            <label for="import-month">Month this import is for</label>
+            <input type="month" id="import-month">
+          </div>
+          <input type="file" id="import-file" accept=".xlsx,.xls">
+        </div>
+
+        <div id="import-preview"></div>
+      </div>
+    </section>
+
+    <!-- ---------- People & aliases (admin) ---------- -->
+    <section class="view" id="people-view">
+      <div class="admin-view-inner">
+        <h2>People &amp; aliases</h2>
+        <p class="sub">Every name that appears in a Project Manager, Marketing Contact, or Billing Manager column needs to resolve to one of these accounts. Unresolved names show up under Import as an error until they're mapped here.</p>
+
+        <div class="people-list" id="people-list"></div>
+
+        <div class="inline-form" id="add-person-form" style="border-top:none;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:28px;flex-wrap:wrap;">
+          <input type="text" id="new-person-name" placeholder="Full name (as you want it shown)">
+          <input type="email" id="new-person-email" placeholder="Email">
+          <input type="text" id="new-person-uid" placeholder="Auth UID (from Supabase &gt; Authentication &gt; Users)">
+          <label style="display:flex;align-items:center;gap:6px;white-space:nowrap;flex:0;">
+            <input type="checkbox" id="new-person-admin"> Admin
+          </label>
+          <button class="btn" id="add-person-btn" style="flex:0;white-space:nowrap;">Add person</button>
+        </div>
+        <p class="sub" style="margin-top:-18px;">First invite them in Supabase (Authentication &gt; Users &gt; Invite user) — that step still has to happen there, since creating a login isn't something this page is allowed to do on its own. Once invited, copy their UID from that same screen into the field above.</p>
+
+        <h2 style="margin-top:28px;">Unresolved names</h2>
+        <p class="sub">Map a name to an existing person, or ask them to be added as a new account first (Supabase dashboard &gt; Authentication &gt; Invite user).</p>
+        <div class="errors-list" id="errors-list"></div>
+      </div>
+    </section>
+
+    <!-- ---------- Submissions (admin) ---------- -->
+    <section class="view" id="submissions-view">
+      <div class="admin-view-inner">
+        <h2>Submission status</h2>
+        <p class="sub" id="submissions-sub">Who has reviewed all of their projects for the selected month.</p>
+        <div class="submission-grid" id="submissions-grid"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================================
+   CONFIG — fill these in from your Supabase project settings
+   (Project Settings > API). The anon key is safe to expose client-side;
+   access is enforced by the RLS policies in schema.sql, not by keeping
+   this key secret.
+   ============================================================================ */
+const SUPABASE_URL = 'https://ykddpajaqftrcmmhizoq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_Y-Jzj8i4_FDJeg6pRSOkpw_p7q1BGlE';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ============================================================================
+   STATE
+   ============================================================================ */
+let state = {
+  user: null,
+  person: null,          // row from `people` for the logged-in user
+  isAdmin: false,
+  myAliases: [],          // lowercased names this person is known by
+  months: [],             // available months, e.g. ['2026-08-01', ...]
+  currentMonth: null,
+  rows: [],               // project_months rows for currentMonth
+  selectedRowId: null,
+  scope: 'mine',          // 'mine' | 'all'
+  bmFilter: '',
+  wipOnly: false,
+  search: '',
+  sortKey: 'project_id',
+  sortDir: 1,
+  peopleDirectory: [],     // all `people` rows
+  aliasDirectory: [],      // all `name_aliases` rows
+  unresolvedErrors: [],
+};
+
+const ACTIONS = [
+  'BILL WIP','HOLD','BILL AND CLOSE','BILL CUSTOM',
+  'T&M CUSTOM (SEE NOTE)','OVER BUDGET - DO NOT BILL','< 500 - BILL WITH GOOD REASON'
+];
+
+const money = n => (n === null || n === undefined || isNaN(n))
+  ? '—'
+  : n.toLocaleString('en-US', {style:'currency', currency:'USD', maximumFractionDigits:0});
+
+const monthLabel = iso => {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+};
+
+function toast(msg, isError){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=> el.classList.remove('show'), 3200);
+}
+
+/* ============================================================================
+   AUTH
+   ============================================================================ */
+document.getElementById('login-btn').addEventListener('click', async ()=>{
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){
+    errEl.textContent = error.message;
+    errEl.style.display = 'block';
+    return;
+  }
+  await boot();
+});
+
+document.getElementById('forgot-btn').addEventListener('click', async ()=>{
+  const email = document.getElementById('login-email').value.trim();
+  if(!email){ toast('Enter your email first', true); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email);
+  toast(error ? error.message : 'Password reset email sent', !!error);
+});
+
+document.getElementById('signout-btn').addEventListener('click', async ()=>{
+  await sb.auth.signOut();
+  location.reload();
+});
+
+async function boot(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ return; }
+  state.user = session.user;
+
+  const { data: person, error } = await sb.from('people').select('*').eq('id', state.user.id).maybeSingle();
+  if(error || !person){
+    document.getElementById('login-error').textContent =
+      "Your account isn't set up in this tool yet. Ask an admin to add you under People & aliases.";
+    document.getElementById('login-error').style.display = 'block';
+    await sb.auth.signOut();
+    return;
+  }
+  state.person = person;
+  state.isAdmin = !!person.is_admin;
+
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('app-view').style.display = 'flex';
+  document.getElementById('who-name').textContent = person.canonical_name;
+  document.getElementById('who-role').textContent = state.isAdmin ? 'Admin' : 'PM / reviewer';
+  document.querySelectorAll('.admin-only').forEach(el => el.style.display = state.isAdmin ? '' : 'none');
+  if(!state.isAdmin){
+    document.getElementById('scope-toggle').style.display = '';
+  }
+
+  await loadDirectories();
+  await loadMonths();
+  wireTabs();
+  wireFilters();
+  wireTableSort();
+}
+
+/* ============================================================================
+   DIRECTORIES (people + aliases), used for edit-permission checks client-side
+   ============================================================================ */
+async function loadDirectories(){
+  const [{ data: people }, { data: aliases }] = await Promise.all([
+    sb.from('people').select('*'),
+    sb.from('name_aliases').select('*'),
+  ]);
+  state.peopleDirectory = people || [];
+  state.aliasDirectory = aliases || [];
+  state.myAliases = [state.person.canonical_name.toLowerCase()]
+    .concat((aliases || []).filter(a => a.person_id === state.person.id).map(a => a.alias.toLowerCase()));
+}
+
+function canEditRow(row){
+  if(state.isAdmin) return true;
+  const names = [row.pm_name_raw, row.mc_name_raw, row.bm_name_raw]
+    .filter(Boolean).map(n => n.toLowerCase());
+  return names.some(n => state.myAliases.includes(n));
+}
+
+function personForAlias(rawName){
+  if(!rawName) return null;
+  const low = rawName.toLowerCase();
+  const alias = state.aliasDirectory.find(a => a.alias.toLowerCase() === low);
+  if(alias) return state.peopleDirectory.find(p => p.id === alias.person_id) || null;
+  const direct = state.peopleDirectory.find(p => p.canonical_name.toLowerCase() === low);
+  return direct || null;
+}
+
+/* ============================================================================
+   MONTHS + PROJECT ROWS
+   ============================================================================ */
+async function loadMonths(){
+  const { data } = await sb.from('project_months').select('month').order('month', {ascending:false});
+  const uniq = [...new Set((data||[]).map(r => r.month))];
+  state.months = uniq;
+  const sel = document.getElementById('month-select');
+  sel.innerHTML = uniq.map(m => `<option value="${m}">${monthLabel(m)}</option>`).join('')
+    || '<option value="">No data imported yet</option>';
+  state.currentMonth = uniq[0] || null;
+  sel.value = state.currentMonth || '';
+  sel.addEventListener('change', async ()=>{
+    state.currentMonth = sel.value;
+    await loadRowsForMonth();
+  });
+  await loadRowsForMonth();
+}
+
+async function loadRowsForMonth(){
+  if(!state.currentMonth){ state.rows = []; renderTable(); renderTopPanel(null); return; }
+  const { data, error } = await sb.from('project_months').select('*').eq('month', state.currentMonth);
+  if(error){ toast('Could not load projects: ' + error.message, true); return; }
+  state.rows = data || [];
+  populateBmFilter();
+  renderTable();
+  if(document.getElementById('submissions-view').classList.contains('active')) renderSubmissions();
+}
+
+function populateBmFilter(){
+  const bms = [...new Set(state.rows.map(r => r.bm_name_raw).filter(Boolean))].sort();
+  const sel = document.getElementById('bm-filter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Billing manager: all</option>' +
+    bms.map(b => `<option value="${b}">${b}</option>`).join('');
+  sel.value = bms.includes(cur) ? cur : '';
+}
+
+/* ============================================================================
+   FILTERING + TABLE
+   ============================================================================ */
+function wireFilters(){
+  document.getElementById('scope-toggle').addEventListener('click', e=>{
+    const btn = e.target.closest('button[data-scope]');
+    if(!btn) return;
+    state.scope = btn.dataset.scope;
+    document.querySelectorAll('#scope-toggle button').forEach(b=>b.classList.toggle('active', b===btn));
+    renderTable();
+  });
+  document.getElementById('bm-filter').addEventListener('change', e=>{ state.bmFilter = e.target.value; renderTable(); });
+  document.getElementById('wip-filter').addEventListener('change', e=>{ state.wipOnly = e.target.checked; renderTable(); });
+  document.getElementById('search-filter').addEventListener('input', e=>{ state.search = e.target.value.toLowerCase(); renderTable(); });
+}
+
+function wireTabs(){
+  document.getElementById('tabs').addEventListener('click', e=>{
+    const btn = e.target.closest('button[data-view]');
+    if(!btn) return;
+    document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active', b===btn));
+    document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id === btn.dataset.view + '-view'));
+    if(btn.dataset.view === 'people') renderPeopleAdmin();
+    if(btn.dataset.view === 'submissions') renderSubmissions();
+  });
+}
+
+function wireTableSort(){
+  document.querySelectorAll('#project-table thead th[data-sort]').forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const key = th.dataset.sort;
+      if(state.sortKey === key) state.sortDir *= -1; else { state.sortKey = key; state.sortDir = 1; }
+      renderTable();
+    });
+  });
+}
+
+function visibleRows(){
+  let rows = state.rows.slice();
+  if(!state.isAdmin && state.scope === 'mine'){
+    rows = rows.filter(canEditRow);
+  }
+  if(state.bmFilter) rows = rows.filter(r => r.bm_name_raw === state.bmFilter);
+  if(state.wipOnly) rows = rows.filter(r => (r.wip || 0) > 0);
+  if(state.search){
+    const s = state.search;
+    rows = rows.filter(r =>
+      (r.project_id||'').toLowerCase().includes(s) ||
+      (r.description||'').toLowerCase().includes(s) ||
+      (r.client||'').toLowerCase().includes(s));
+  }
+  rows.sort((a,b)=>{
+    let av = a[state.sortKey], bv = b[state.sortKey];
+    if(typeof av === 'string') av = (av||'').toLowerCase();
+    if(typeof bv === 'string') bv = (bv||'').toLowerCase();
+    if(av === bv) return 0;
+    return (av > bv ? 1 : -1) * state.sortDir;
+  });
+  return rows;
+}
+
+function renderTable(){
+  const rows = visibleRows();
+  const body = document.getElementById('project-table-body');
+  if(!rows.length){
+    body.innerHTML = `<tr><td colspan="9"><div class="empty-state">No projects match the current filters.</div></td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(r => `
+    <tr data-id="${r.id}" class="${r.id === state.selectedRowId ? 'selected' : ''}">
+      <td>${r.project_id}${!r.active ? ' <span class="flag-icon" title="No longer in the latest Ajera export">!</span>':''}</td>
+      <td>${r.client || ''}</td>
+      <td>${r.pm_name_raw || ''}</td>
+      <td>${r.mc_name_raw || ''}</td>
+      <td>${r.bm_name_raw || ''}</td>
+      <td class="num">${money(r.wip)}</td>
+      <td class="num">${money(r.bill_remaining)}</td>
+      <td>${r.action || ''}</td>
+      <td><span class="status-dot ${r.reviewed ? 'yes':'no'}"></span>${r.reviewed ? 'Reviewed' : 'Pending'}</td>
+    </tr>
+  `).join('');
+  body.querySelectorAll('tr[data-id]').forEach(tr=>{
+    tr.addEventListener('click', ()=>{
+      state.selectedRowId = Number(tr.dataset.id);
+      renderTable();
+      renderTopPanel(state.rows.find(r => r.id === state.selectedRowId));
+    });
+  });
+}
+
+/* ============================================================================
+   TOP PANEL — selected project
+   ============================================================================ */
+function barChartSvg(contract, billed, spent){
+  const vals = [contract||0, billed||0, spent||0];
+  const max = Math.max(...vals, 1);
+  const labels = ['Contract','Billed','Spent'];
+  const colors = ['#8592A6', '#1F6F78', '#C77D2E'];
+  const w = 260, h = 130, barW = 44, gap = 34, base = h - 22;
+  let bars = '';
+  vals.forEach((v,i)=>{
+    const bh = Math.round((v/max) * (base-14));
+    const x = 20 + i*(barW+gap);
+    bars += `<rect x="${x}" y="${base-bh}" width="${barW}" height="${bh}" fill="${colors[i]}" rx="2"></rect>`;
+    bars += `<text x="${x+barW/2}" y="${base+14}" text-anchor="middle" font-size="10.5" fill="#4C5A73" font-family="Inter,sans-serif">${labels[i]}</text>`;
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="130">
+    <line x1="0" y1="${base}" x2="${w}" y2="${base}" stroke="#D7DCE3" stroke-width="1"></line>
+    ${bars}
+  </svg>`;
+}
+
+function renderTopPanel(row){
+  const el = document.getElementById('review-top');
+  if(!row){
+    el.innerHTML = `<div class="empty-state">Select a project below to review it.</div>`;
+    return;
+  }
+  const editable = canEditRow(row);
+  el.innerHTML = `
+    <div class="panel-card">
+      <div class="panel-head">
+        <div class="titles">
+          <h2>${row.project_id} — ${row.description || ''}</h2>
+          <div class="meta"><b>${row.client || ''}</b> · PM: ${row.pm_name_raw||'—'} · MC: ${row.mc_name_raw||'—'} · BM: ${row.bm_name_raw||'—'}</div>
+        </div>
+        <span class="reviewed-pill ${row.reviewed ? 'yes':'no'}">${row.reviewed ? 'Reviewed' : 'Not yet reviewed'}</span>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-tile"><div class="lbl">Total contract</div><div class="val">${money(row.total_contract_amount)}</div></div>
+        <div class="stat-tile"><div class="lbl">Billed</div><div class="val">${money(row.billed)}</div></div>
+        <div class="stat-tile"><div class="lbl">Spent</div><div class="val">${money(row.spent)}</div></div>
+        <div class="stat-tile ${row.spend_remaining < 0 ? 'negative':''}"><div class="lbl">Spend remaining</div><div class="val">${money(row.spend_remaining)}</div></div>
+        <div class="stat-tile"><div class="lbl">Bill remaining</div><div class="val">${money(row.bill_remaining)}</div></div>
+        <div class="stat-tile wip"><div class="lbl">WIP</div><div class="val">${money(row.wip)}</div></div>
+      </div>
+
+      <div class="chart-row">
+        <div class="chart-wrap">${barChartSvg(row.total_contract_amount, row.billed, row.spent)}</div>
+        <div class="chart-legend">
+          <div class="li"><span class="sw" style="background:#8592A6"></span>Contract amount</div>
+          <div class="li"><span class="sw" style="background:#1F6F78"></span>Billed to date</div>
+          <div class="li"><span class="sw" style="background:#C77D2E"></span>Spent to date</div>
+        </div>
+      </div>
+
+      <fieldset id="edit-fields" ${editable ? '' : 'class="locked" disabled'} style="border:none;padding:0;margin:0;">
+        <div class="edit-grid">
+          <div class="field">
+            <label for="f-requested">Requested bill amount</label>
+            <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}">
+          </div>
+          <div class="field">
+            <label for="f-action">Project manager action</label>
+            <select id="f-action">
+              <option value="">— choose —</option>
+              ${ACTIONS.map(a => `<option value="${a}" ${row.action===a?'selected':''}>${a}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field full">
+            <label for="f-notes">Notes</label>
+            <textarea id="f-notes">${row.notes || ''}</textarea>
+          </div>
+          ${state.isAdmin ? `
+          <div class="field full">
+            <label for="f-admin-notes">Admin notes</label>
+            <textarea id="f-admin-notes">${row.admin_notes || ''}</textarea>
+          </div>` : ''}
+          <div class="field">
+            <label><input type="checkbox" id="f-reviewed" ${row.reviewed?'checked':''}> Mark this project reviewed</label>
+          </div>
+        </div>
+      </fieldset>
+      ${!editable ? '<div class="locked-note">You can view this project, but only its Project Manager, Marketing Contact, Billing Manager, or an admin can edit it.</div>' : ''}
+      <div style="margin-top:16px;">
+        <button class="btn" id="save-row-btn" ${editable ? '' : 'disabled'}>Save changes</button>
+      </div>
+    </div>
+  `;
+
+  if(editable){
+    document.getElementById('save-row-btn').addEventListener('click', ()=> saveRow(row));
+  }
+}
+
+async function saveRow(row){
+  const payload = {
+    requested_bill_amount: parseFloat(document.getElementById('f-requested').value) || null,
+    action: document.getElementById('f-action').value || null,
+    notes: document.getElementById('f-notes').value || null,
+    reviewed: document.getElementById('f-reviewed').checked,
+  };
+  if(payload.reviewed && !row.reviewed){
+    payload.reviewed_by = state.person.id;
+    payload.reviewed_at = new Date().toISOString();
+  }
+  if(!payload.reviewed){
+    payload.reviewed_by = null;
+    payload.reviewed_at = null;
+  }
+  if(state.isAdmin){
+    payload.admin_notes = document.getElementById('f-admin-notes').value || null;
+  }
+  const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
+  if(error){ toast('Save failed: ' + error.message, true); return; }
+  toast('Saved');
+  await loadRowsForMonth();
+  renderTopPanel(state.rows.find(r => r.id === row.id));
+}
+
+/* ============================================================================
+   IMPORT (admin)
+   ============================================================================ */
+const EXPECTED_HEADERS = {
+  'Project ID':'project_id',
+  'Project Description':'description',
+  'Client':'client',
+  'Project Manager':'pm_name_raw',
+  'Marketing Contact':'mc_name_raw',
+  'Billing Manager':'bm_name_raw',
+  'Total Contract Amount':'total_contract_amount',
+  'Billed':'billed',
+  'Spent':'spent',
+  'Spend Remaining':'spend_remaining',
+  'Bill Remaining (Contract minus Billed)':'bill_remaining',
+  'WIP':'wip',
+};
+const IGNORABLE_NAMES = ['no marketing contact','n/a','none',''];
+
+document.getElementById('import-file').addEventListener('change', async e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const monthInput = document.getElementById('import-month').value; // "2026-08"
+  if(!monthInput){ toast('Pick the month this import is for first', true); e.target.value=''; return; }
+  const monthDate = monthInput + '-01';
+
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:'array'});
+  const sheetName = wb.SheetNames.find(n => n.toLowerCase() !== 'drop down list') || wb.SheetNames[0];
+  const sheet = wb.Sheets[sheetName];
+  const raw = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null});
+
+  const headerRowIdx = raw.findIndex(r => r && r.some(c => (c||'').toString().trim() === 'Project ID'));
+  if(headerRowIdx === -1){ toast('Could not find a "Project ID" header row in that sheet', true); return; }
+  const headerRow = raw[headerRowIdx].map(c => (c||'').toString().trim());
+  const colIndex = {};
+  headerRow.forEach((h,i)=>{ if(EXPECTED_HEADERS[h]) colIndex[EXPECTED_HEADERS[h]] = i; });
+  if(colIndex.project_id === undefined){ toast('Header row found, but no Project ID column mapped', true); return; }
+
+  const records = [];
+  for(let i = headerRowIdx+1; i < raw.length; i++){
+    const r = raw[i];
+    if(!r) continue;
+    const pid = r[colIndex.project_id];
+    const desc = colIndex.description !== undefined ? r[colIndex.description] : null;
+    if(!pid || !desc) continue; // skip blank/summary rows
+    const rec = { month: monthDate, project_id: pid.toString().trim() };
+    Object.entries(colIndex).forEach(([field, idx])=>{
+      if(field === 'project_id') return;
+      let v = r[idx];
+      if(typeof v === 'number' && ['total_contract_amount','billed','spent','spend_remaining','bill_remaining','wip'].includes(field)){
+        // numeric already
+      } else if(['total_contract_amount','billed','spent','spend_remaining','bill_remaining','wip'].includes(field)){
+        v = parseFloat(v) || 0;
+      } else if(typeof v === 'string'){
+        v = v.trim();
+      }
+      rec[field] = v ?? null;
+    });
+    records.push(rec);
+  }
+
+  renderImportPreview(records, monthDate);
+});
+
+function renderImportPreview(records, monthDate){
+  const el = document.getElementById('import-preview');
+  el.innerHTML = `
+    <div class="import-summary">
+      <div class="row"><span>Month</span><span class="n">${monthLabel(monthDate)}</span></div>
+      <div class="row"><span>Rows parsed</span><span class="n">${records.length}</span></div>
+    </div>
+    <button class="btn" id="confirm-import-btn">Confirm import</button>
+  `;
+  document.getElementById('confirm-import-btn').addEventListener('click', ()=> runImport(records, monthDate));
+}
+
+async function runImport(records, monthDate){
+  const btn = document.getElementById('confirm-import-btn');
+  btn.disabled = true; btn.textContent = 'Importing…';
+
+  const { data: existingRows } = await sb.from('project_months').select('*').eq('month', monthDate);
+  const existingById = {};
+  (existingRows||[]).forEach(r => existingById[r.project_id] = r);
+
+  let newCount = 0;
+  const unresolved = []; // {project_id, role, raw_name}
+
+  for(const rec of records){
+    const ajeraFields = {
+      description: rec.description, client: rec.client,
+      pm_name_raw: rec.pm_name_raw, mc_name_raw: rec.mc_name_raw, bm_name_raw: rec.bm_name_raw,
+      total_contract_amount: rec.total_contract_amount, billed: rec.billed, spent: rec.spent,
+      spend_remaining: rec.spend_remaining, bill_remaining: rec.bill_remaining, wip: rec.wip,
+      active: true,
+    };
+    const existing = existingById[rec.project_id];
+    if(existing){
+      await sb.from('project_months').update(ajeraFields).eq('id', existing.id);
+    } else {
+      await sb.from('project_months').insert({ project_id: rec.project_id, month: monthDate, ...ajeraFields });
+      newCount++;
+    }
+
+    [['Project Manager','pm_name_raw'],['Marketing Contact','mc_name_raw'],['Billing Manager','bm_name_raw']].forEach(([role, field])=>{
+      const raw = rec[field];
+      if(!raw || IGNORABLE_NAMES.includes(raw.toLowerCase())) return;
+      if(!personForAlias(raw)) unresolved.push({ project_id: rec.project_id, role, raw_name: raw });
+    });
+  }
+
+  const { data: run } = await sb.from('import_runs').insert({
+    month: monthDate, imported_by: state.person.id,
+    row_count: records.length, new_project_count: newCount, unresolved_name_count: unresolved.length,
+  }).select().single();
+
+  if(unresolved.length && run){
+    await sb.from('import_errors').insert(unresolved.map(u => ({...u, import_run_id: run.id})));
+  }
+
+  document.getElementById('import-preview').innerHTML = `
+    <div class="import-summary">
+      <div class="row"><span>Month</span><span class="n">${monthLabel(monthDate)}</span></div>
+      <div class="row"><span>Rows processed</span><span class="n">${records.length}</span></div>
+      <div class="row"><span>New projects added</span><span class="n">${newCount}</span></div>
+      <div class="row"><span>Unresolved names</span><span class="n">${unresolved.length}</span></div>
+    </div>
+    ${unresolved.length ? `<p class="sub">See People &amp; aliases to map the unresolved names.</p>` : ''}
+  `;
+  toast('Import complete');
+  await loadMonths();
+  await loadDirectories();
+}
+
+/* ============================================================================
+   PEOPLE & ALIASES (admin)
+   ============================================================================ */
+document.getElementById('add-person-btn').addEventListener('click', async ()=>{
+  const canonical_name = document.getElementById('new-person-name').value.trim();
+  const email = document.getElementById('new-person-email').value.trim();
+  const id = document.getElementById('new-person-uid').value.trim();
+  const is_admin = document.getElementById('new-person-admin').checked;
+  if(!canonical_name || !id){ toast('Name and Auth UID are required', true); return; }
+
+  const { error } = await sb.from('people').insert({ id, canonical_name, email: email || null, is_admin });
+  if(error){
+    // Most common cause: the UID doesn't match a real Auth user yet (they
+    // haven't been invited / haven't accepted the invite), which trips the
+    // foreign key to auth.users.
+    const msg = error.message.includes('foreign key')
+      ? "That UID doesn't match an invited Auth user yet — invite them in Supabase first, then try again."
+      : error.message;
+    toast('Could not add person: ' + msg, true);
+    return;
+  }
+  toast(canonical_name + ' added');
+  document.getElementById('new-person-name').value = '';
+  document.getElementById('new-person-email').value = '';
+  document.getElementById('new-person-uid').value = '';
+  document.getElementById('new-person-admin').checked = false;
+  await renderPeopleAdmin();
+});
+
+async function renderPeopleAdmin(){
+  await loadDirectories();
+  const { data: errors } = await sb.from('import_errors').select('*').eq('resolved', false).order('created_at', {ascending:false});
+  state.unresolvedErrors = errors || [];
+
+  const peopleList = document.getElementById('people-list');
+  peopleList.innerHTML = state.peopleDirectory.map(p => {
+    const aliases = state.aliasDirectory.filter(a => a.person_id === p.id);
+    return `
+      <div class="list-row">
+        <div>
+          <div class="primary">${p.canonical_name}${p.is_admin ? ' · Admin' : ''}</div>
+          <div class="secondary">${p.email || ''}</div>
+          <div class="alias-tags">${aliases.map(a => `<span class="alias-tag">${a.alias}</span>`).join('') || '<span class="secondary">No aliases yet</span>'}</div>
+        </div>
+        <button class="btn secondary add-alias-btn" data-person="${p.id}">Add alias</button>
+      </div>
+    `;
+  }).join('') || '<div class="list-row secondary">No accounts yet.</div>';
+
+  peopleList.querySelectorAll('.add-alias-btn').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const alias = prompt('Alias to add for this person (exact spelling as it appears in Ajera exports):');
+      if(!alias) return;
+      const { error } = await sb.from('name_aliases').insert({ alias: alias.trim(), person_id: btn.dataset.person });
+      if(error){ toast(error.message, true); return; }
+      toast('Alias added');
+      await renderPeopleAdmin();
+    });
+  });
+
+  const errorsList = document.getElementById('errors-list');
+  errorsList.innerHTML = state.unresolvedErrors.length
+    ? state.unresolvedErrors.map(er => `
+      <div class="list-row">
+        <div>
+          <div class="primary">${er.raw_name}</div>
+          <div class="secondary">${er.role} on project ${er.project_id}</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <select class="map-select" data-error="${er.id}" data-name="${er.raw_name}">
+            <option value="">Map to…</option>
+            ${state.peopleDirectory.map(p => `<option value="${p.id}">${p.canonical_name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    `).join('')
+    : '<div class="list-row secondary">No unresolved names.</div>';
+
+  errorsList.querySelectorAll('.map-select').forEach(sel=>{
+    sel.addEventListener('change', async ()=>{
+      if(!sel.value) return;
+      const errorId = sel.dataset.error;
+      const raw = sel.dataset.name;
+      await sb.from('name_aliases').insert({ alias: raw, person_id: sel.value });
+      await sb.from('import_errors').update({ resolved: true }).eq('id', errorId);
+      toast('Mapped ' + raw);
+      await renderPeopleAdmin();
+    });
+  });
+}
+
+/* ============================================================================
+   SUBMISSIONS (admin)
+   ============================================================================ */
+function renderSubmissions(){
+  const sub = document.getElementById('submissions-sub');
+  sub.textContent = state.currentMonth
+    ? `Who has reviewed all of their projects for ${monthLabel(state.currentMonth)}.`
+    : 'No month selected yet.';
+
+  const byPerson = {};
+  state.rows.forEach(r=>{
+    [r.pm_name_raw, r.mc_name_raw, r.bm_name_raw].filter(Boolean).forEach(raw=>{
+      if(IGNORABLE_NAMES.includes(raw.toLowerCase())) return;
+      const person = personForAlias(raw);
+      const key = person ? person.id : ('unmapped:' + raw);
+      const label = person ? person.canonical_name : raw + ' (unmapped)';
+      if(!byPerson[key]) byPerson[key] = { label, total:0, reviewed:0, ids:new Set() };
+      if(byPerson[key].ids.has(r.id)) return; // avoid double count if same person is e.g. both PM and BM
+      byPerson[key].ids.add(r.id);
+      byPerson[key].total++;
+      if(r.reviewed) byPerson[key].reviewed++;
+    });
+  });
+
+  const grid = document.getElementById('submissions-grid');
+  const entries = Object.values(byPerson).sort((a,b)=> (b.total-b.reviewed) - (a.total-a.reviewed));
+  grid.innerHTML = entries.length ? entries.map(e=>{
+    const pct = e.total ? Math.round((e.reviewed/e.total)*100) : 0;
+    return `
+      <div class="sub-card">
+        <div class="nm">${e.label}</div>
+        <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="cnt">${e.reviewed} / ${e.total} reviewed</div>
+      </div>
+    `;
+  }).join('') : '<div class="empty-state">No projects for this month yet.</div>';
+}
+
+/* ============================================================================
+   INIT
+   ============================================================================ */
+(async function init(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(session) await boot();
+})();
+</script>
+</body>
+</html>
