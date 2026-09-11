@@ -49,6 +49,8 @@ create table project_months (
   pm_name_raw text,
   mc_name_raw text,
   bm_name_raw text,
+  project_status text,                 -- Ajera's own status field (Active, Closed, etc.)
+  project_type text,                   -- Ajera's project type (e.g. "MEPBE Cx", "MEP Cx", "BE Cx")
   total_contract_amount numeric,
   billed numeric,
   spent numeric,
@@ -56,8 +58,9 @@ create table project_months (
   bill_remaining numeric,
   wip numeric,
   active boolean not null default true, -- false if this project vanished from a later import
+  is_test boolean not null default false, -- true if it came from a test import (wipeable in one click)
 
-  -- PM/MC/BM-entered, preserved across re-imports.
+  -- PM-entered fields, preserved across re-imports.
   requested_bill_amount numeric,
   action text,
   notes text,
@@ -65,6 +68,15 @@ create table project_months (
   reviewed boolean not null default false,
   reviewed_by uuid references people(id),
   reviewed_at timestamptz,
+
+  -- MC-entered fields, used only for MEPBE Cx projects where the MC has an
+  -- independent review responsibility. On all other project types these stay
+  -- null and are ignored by the UI.
+  mc_requested_bill_amount numeric,
+  mc_notes text,
+  mc_reviewed boolean not null default false,
+  mc_reviewed_by uuid references people(id),
+  mc_reviewed_at timestamptz,
 
   updated_at timestamptz not null default now(),
   unique (project_id, month)
@@ -81,7 +93,8 @@ create table import_runs (
   imported_at timestamptz not null default now(),
   row_count int,
   new_project_count int,
-  unresolved_name_count int
+  unresolved_name_count int,
+  is_test boolean not null default false
 );
 
 create table import_errors (
@@ -104,19 +117,34 @@ alter table project_months enable row level security;
 alter table import_runs enable row level security;
 alter table import_errors enable row level security;
 
+-- is_admin() exists specifically so that "is this person an admin" can be
+-- checked WITHOUT that check itself being subject to the people table's own
+-- row-level security policies. Writing that check as a plain subquery
+-- directly inside a policy on `people` causes infinite recursion (checking
+-- the policy re-triggers the policy, forever), which Postgres eventually
+-- errors out on. `security definer` is what lets this function look at the
+-- table's raw contents, bypassing RLS for this one narrow purpose only.
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select coalesce((select is_admin from people where id = auth.uid()), false);
+$$;
+
 -- Everyone signed in can read the roster and aliases (needed to show names
 -- and to resolve "who can edit this row" client-side); only admins can write.
 create policy people_select on people
   for select using (auth.role() = 'authenticated');
 create policy people_admin_write on people
-  for all using (exists (select 1 from people p where p.id = auth.uid() and p.is_admin))
-  with check (exists (select 1 from people p where p.id = auth.uid() and p.is_admin));
+  for all using (is_admin()) with check (is_admin());
 
 create policy aliases_select on name_aliases
   for select using (auth.role() = 'authenticated');
 create policy aliases_admin_write on name_aliases
-  for all using (exists (select 1 from people p where p.id = auth.uid() and p.is_admin))
-  with check (exists (select 1 from people p where p.id = auth.uid() and p.is_admin));
+  for all using (is_admin()) with check (is_admin());
 
 -- Everyone can view every project (the "view all" requirement); the app UI
 -- defaults PMs to their own projects, but the row-level policy itself is
@@ -126,9 +154,9 @@ create policy pm_select on project_months
 
 -- Only admins can add/remove project rows (that happens via the Import step).
 create policy pm_admin_insert on project_months
-  for insert with check (exists (select 1 from people p where p.id = auth.uid() and p.is_admin));
+  for insert with check (is_admin());
 create policy pm_admin_delete on project_months
-  for delete using (exists (select 1 from people p where p.id = auth.uid() and p.is_admin));
+  for delete using (is_admin());
 
 -- Updates: allowed for admins, or for anyone whose alias matches the PM,
 -- Marketing Contact, or Billing Manager named on that specific row.
@@ -137,7 +165,7 @@ create policy pm_admin_delete on project_months
 create policy pm_update on project_months
   for update
   using (
-    exists (select 1 from people p where p.id = auth.uid() and p.is_admin)
+    is_admin()
     or exists (
       select 1 from name_aliases na
       where na.person_id = auth.uid()
@@ -147,11 +175,9 @@ create policy pm_update on project_months
   with check (true);
 
 create policy runs_admin on import_runs
-  for all using (exists (select 1 from people p where p.id = auth.uid() and p.is_admin))
-  with check (exists (select 1 from people p where p.id = auth.uid() and p.is_admin));
+  for all using (is_admin()) with check (is_admin());
 create policy errors_admin on import_errors
-  for all using (exists (select 1 from people p where p.id = auth.uid() and p.is_admin))
-  with check (exists (select 1 from people p where p.id = auth.uid() and p.is_admin));
+  for all using (is_admin()) with check (is_admin());
 
 -- ============================================================================
 -- Column protection: a non-admin can update a row (per the policy above) but
@@ -167,26 +193,65 @@ security definer
 set search_path = public
 as $$
 declare
-  is_admin_user boolean;
+  v_is_admin boolean;
+  v_is_pm    boolean;
+  v_is_mc    boolean;
 begin
-  select coalesce((select is_admin from people where id = auth.uid()), false) into is_admin_user;
+  v_is_admin := is_admin();
 
-  if not is_admin_user then
-    NEW.project_id := OLD.project_id;
-    NEW.month := OLD.month;
-    NEW.description := OLD.description;
-    NEW.client := OLD.client;
-    NEW.pm_name_raw := OLD.pm_name_raw;
-    NEW.mc_name_raw := OLD.mc_name_raw;
-    NEW.bm_name_raw := OLD.bm_name_raw;
-    NEW.total_contract_amount := OLD.total_contract_amount;
-    NEW.billed := OLD.billed;
-    NEW.spent := OLD.spent;
-    NEW.spend_remaining := OLD.spend_remaining;
-    NEW.bill_remaining := OLD.bill_remaining;
-    NEW.wip := OLD.wip;
-    NEW.active := OLD.active;
-    NEW.admin_notes := OLD.admin_notes;
+  if not v_is_admin then
+    -- Ajera-sourced fields: nobody edits these except via an import run.
+    NEW.project_id              := OLD.project_id;
+    NEW.month                   := OLD.month;
+    NEW.description             := OLD.description;
+    NEW.client                  := OLD.client;
+    NEW.pm_name_raw             := OLD.pm_name_raw;
+    NEW.mc_name_raw             := OLD.mc_name_raw;
+    NEW.bm_name_raw             := OLD.bm_name_raw;
+    NEW.project_status          := OLD.project_status;
+    NEW.project_type            := OLD.project_type;
+    NEW.total_contract_amount   := OLD.total_contract_amount;
+    NEW.billed                  := OLD.billed;
+    NEW.spent                   := OLD.spent;
+    NEW.spend_remaining         := OLD.spend_remaining;
+    NEW.bill_remaining          := OLD.bill_remaining;
+    NEW.wip                     := OLD.wip;
+    NEW.active                  := OLD.active;
+    NEW.is_test                 := OLD.is_test;
+    NEW.admin_notes             := OLD.admin_notes;
+
+    -- Work out whether the caller is the PM or the MC on this row, so we
+    -- can enforce which review fields each party is allowed to touch.
+    select exists(
+      select 1 from name_aliases na
+      where na.person_id = auth.uid()
+        and lower(na.alias) = lower(OLD.pm_name_raw)
+    ) into v_is_pm;
+
+    select exists(
+      select 1 from name_aliases na
+      where na.person_id = auth.uid()
+        and lower(na.alias) = lower(OLD.mc_name_raw)
+    ) into v_is_mc;
+
+    -- PM cannot overwrite the MC's review fields, and vice versa.
+    -- If someone is both PM and MC on a row (edge case), they can edit both.
+    if not v_is_pm then
+      NEW.requested_bill_amount := OLD.requested_bill_amount;
+      NEW.action                := OLD.action;
+      NEW.notes                 := OLD.notes;
+      NEW.reviewed              := OLD.reviewed;
+      NEW.reviewed_by           := OLD.reviewed_by;
+      NEW.reviewed_at           := OLD.reviewed_at;
+    end if;
+
+    if not v_is_mc then
+      NEW.mc_requested_bill_amount := OLD.mc_requested_bill_amount;
+      NEW.mc_notes                 := OLD.mc_notes;
+      NEW.mc_reviewed              := OLD.mc_reviewed;
+      NEW.mc_reviewed_by           := OLD.mc_reviewed_by;
+      NEW.mc_reviewed_at           := OLD.mc_reviewed_at;
+    end if;
   end if;
 
   NEW.updated_at := now();

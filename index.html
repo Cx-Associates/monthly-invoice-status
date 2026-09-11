@@ -219,6 +219,25 @@
     font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;
     letter-spacing:0.03em;margin-left:6px;vertical-align:middle;
   }
+  .mepbe-badge{
+    display:inline-block;background:#EAE4F7;color:#6B3FA0;
+    font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;
+    letter-spacing:0.03em;margin-left:6px;vertical-align:middle;
+  }
+  .review-section-head{
+    font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;
+    text-transform:uppercase;letter-spacing:0.04em;
+  }
+  .review-section-who{
+    font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);margin-left:6px;
+  }
+  .filter-label{
+    display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);
+    cursor:help;
+  }
+  .filter-label select{
+    padding:6px 9px;border:1px solid var(--line);border-radius:4px;font-size:12.5px;background:#fff;
+  }
   .test-banner{
     background:var(--warn-soft);border:1px solid var(--warn);border-radius:var(--radius);
     padding:11px 15px;margin-bottom:16px;font-size:13px;color:#8a561b;
@@ -379,7 +398,21 @@
           <button data-scope="all">All projects</button>
         </div>
         <div class="sep"></div>
+        <!-- Only shown when "My projects" is active. The tooltip explains the
+             smart default: PM is the default because MCs only have a review
+             responsibility on MEPBE Cx projects, which always appear regardless
+             of this setting. -->
+        <label class="filter-label" id="my-role-label" title="Controls which of your roles determines 'My projects'. MEPBE Cx projects where you are MC always appear regardless of this setting, since those require your active review.">
+          I am:
+          <select id="my-role-filter">
+            <option value="pm">PM only</option>
+            <option value="mc">MC only</option>
+            <option value="both">PM or MC</option>
+          </select>
+        </label>
+        <div class="sep"></div>
         <select id="bm-filter"><option value="">Billing manager: all</option></select>
+        <select id="type-filter"><option value="">Project type: all</option></select>
         <label class="checkbox-filter"><input type="checkbox" id="wip-filter"> Has any WIP</label>
         <label class="checkbox-filter"><input type="checkbox" id="active-filter" checked> Active projects only</label>
         <input type="text" id="search-filter" placeholder="Search project, client...">
@@ -539,6 +572,8 @@ let state = {
   bmFilter: '',
   wipOnly: false,
   activeOnly: true,
+  myRoleFilter: 'pm',
+  typeFilter: '',
   search: '',
   sortKey: 'project_id',
   sortDir: 1,
@@ -647,6 +682,24 @@ async function loadDirectories(){
     .concat((aliases || []).filter(a => a.person_id === state.person.id).map(a => a.alias.toLowerCase()));
 }
 
+// Returns true if this project is a combined MEPBE Cx project, which changes
+// the review layout and visibility rules.
+function isMepbeCx(row){
+  return (row.project_type || '').trim().toLowerCase() === 'mepbe cx';
+}
+
+// Returns true if the logged-in person is the PM on this row.
+function isMyPmRow(row){
+  if(!row.pm_name_raw) return false;
+  return state.myAliases.includes(row.pm_name_raw.toLowerCase());
+}
+
+// Returns true if the logged-in person is the MC on this row.
+function isMyMcRow(row){
+  if(!row.mc_name_raw) return false;
+  return state.myAliases.includes(row.mc_name_raw.toLowerCase());
+}
+
 function canEditRow(row){
   if(state.isAdmin) return true;
   const names = [row.pm_name_raw, row.mc_name_raw, row.bm_name_raw]
@@ -688,6 +741,7 @@ async function loadRowsForMonth(){
   if(error){ toast('Could not load projects: ' + error.message, true); return; }
   state.rows = data || [];
   populateBmFilter();
+  populateTypeFilter();
   renderTable();
   if(document.getElementById('submissions-view').classList.contains('active')) renderSubmissions();
 }
@@ -701,6 +755,16 @@ function populateBmFilter(){
   sel.value = bms.includes(cur) ? cur : '';
 }
 
+function populateTypeFilter(){
+  const types = [...new Set(state.rows.map(r => r.project_type).filter(Boolean))].sort();
+  const sel = document.getElementById('type-filter');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Project type: all</option>' +
+    types.map(t => `<option value="${t}">${t}</option>`).join('');
+  sel.value = types.includes(cur) ? cur : '';
+}
+
 /* ============================================================================
    FILTERING + TABLE
    ============================================================================ */
@@ -710,9 +774,15 @@ function wireFilters(){
     if(!btn) return;
     state.scope = btn.dataset.scope;
     document.querySelectorAll('#scope-toggle button').forEach(b=>b.classList.toggle('active', b===btn));
+    // Only show the "I am" filter when "My projects" is active and the user
+    // is not an admin (admins see everything regardless).
+    const showRole = state.scope === 'mine' && !state.isAdmin;
+    document.getElementById('my-role-label').style.display = showRole ? '' : 'none';
     renderTable();
   });
+  document.getElementById('my-role-filter').addEventListener('change', e=>{ state.myRoleFilter = e.target.value; renderTable(); });
   document.getElementById('bm-filter').addEventListener('change', e=>{ state.bmFilter = e.target.value; renderTable(); });
+  document.getElementById('type-filter').addEventListener('change', e=>{ state.typeFilter = e.target.value; renderTable(); });
   document.getElementById('wip-filter').addEventListener('change', e=>{ state.wipOnly = e.target.checked; renderTable(); });
   document.getElementById('active-filter').addEventListener('change', e=>{ state.activeOnly = e.target.checked; renderTable(); });
   document.getElementById('search-filter').addEventListener('input', e=>{ state.search = e.target.value.toLowerCase(); renderTable(); });
@@ -742,10 +812,24 @@ function wireTableSort(){
 
 function visibleRows(){
   let rows = state.rows.slice();
-  if(!state.isAdmin && state.scope === 'mine'){
-    rows = rows.filter(canEditRow);
+
+  if(state.scope === 'mine' && !state.isAdmin){
+    const roleFilter = state.myRoleFilter || 'pm'; // default: PM only
+    rows = rows.filter(r => {
+      const asPm = isMyPmRow(r);
+      const asMc = isMyMcRow(r);
+      // Always include MEPBE Cx rows where the user is the MC, regardless of
+      // the role filter, since those require the MC's active review.
+      if(asMc && isMepbeCx(r)) return true;
+      if(roleFilter === 'pm')   return asPm;
+      if(roleFilter === 'mc')   return asMc;
+      if(roleFilter === 'both') return asPm || asMc;
+      return asPm;
+    });
   }
+
   if(state.bmFilter) rows = rows.filter(r => r.bm_name_raw === state.bmFilter);
+  if(state.typeFilter) rows = rows.filter(r => r.project_type === state.typeFilter);
   if(state.wipOnly) rows = rows.filter(r => (r.wip || 0) > 0);
   if(state.activeOnly) rows = rows.filter(r => !r.project_status || r.project_status.toLowerCase() === 'active');
   if(state.search){
@@ -774,11 +858,11 @@ function renderTable(){
   }
   body.innerHTML = rows.map(r => `
     <tr data-id="${r.id}" class="${r.id === state.selectedRowId ? 'selected' : ''}">
-      <td>${r.project_id}${!r.active ? ' <span class="flag-icon" title="No longer in the latest Ajera export">!</span>':''}${r.is_test ? '<span class="test-badge">TEST</span>':''}</td>
+      <td>${r.project_id}${!r.active ? ' <span class="flag-icon" title="No longer in the latest Ajera export">!</span>':''}${r.is_test ? '<span class="test-badge">TEST</span>':''}${isMepbeCx(r) ? '<span class="mepbe-badge">MEPBE</span>':''}</td>
       <td class="desc-cell" title="${(r.description||'').replace(/"/g,'&quot;')}">${r.description || ''}</td>
       <td>${r.pm_name_raw || ''}</td>
       <td class="num">${money(r.wip)}</td>
-      <td><span class="status-dot ${r.reviewed ? 'yes':'no'}"></span>${r.reviewed ? 'Reviewed' : 'Pending'}</td>
+      <td><span class="status-dot ${reviewedClass(r)}"></span>${reviewedLabel(r)}</td>
     </tr>
   `).join('');
   body.querySelectorAll('tr[data-id]').forEach(tr=>{
@@ -827,6 +911,77 @@ function barChartSvg(contract, billed, spent){
   </svg>`;
 }
 
+// Returns a human-readable combined reviewed status for the table column.
+function reviewedLabel(row){
+  if(!isMepbeCx(row)) return row.reviewed ? 'Reviewed' : 'Pending';
+  const pm = row.reviewed, mc = row.mc_reviewed;
+  if(pm && mc) return 'Both reviewed';
+  if(pm)       return 'PM reviewed';
+  if(mc)       return 'MC reviewed';
+  return 'Neither reviewed';
+}
+
+function reviewedClass(row){
+  if(!isMepbeCx(row)) return row.reviewed ? 'yes' : 'no';
+  return (row.reviewed && row.mc_reviewed) ? 'yes' : 'no';
+}
+
+// Renders the PM review section (always shown).
+function pmReviewHtml(row, editable){
+  return `
+    <div class="review-section" id="pm-section">
+      <div class="review-section-head">MEP review <span class="review-section-who">${row.pm_name_raw || 'PM'}</span></div>
+      <div class="edit-grid">
+        <div class="field">
+          <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
+          <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
+        </div>
+        <div class="field full">
+          <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
+          <textarea id="f-notes" ${editable ? '' : 'disabled'}>${row.notes || ''}</textarea>
+        </div>
+      </div>
+      ${editable ? `
+      <div class="save-row">
+        <button class="btn secondary" id="pm-save-btn">Save MEP entries</button>
+      </div>
+      <div class="review-action-bar">
+        <button class="btn-reviewed ${row.reviewed ? 'is-reviewed':''}" id="pm-reviewed-btn">
+          ${row.reviewed ? '<span class="tick">&#10003;</span> MEP reviewed — click to undo' : 'Mark MEP reviewed'}
+        </button>
+        <div class="review-action-note" id="pm-reviewed-note"></div>
+      </div>` : ''}
+    </div>`;
+}
+
+// Renders the MC review section (only for MEPBE Cx projects).
+function mcReviewHtml(row, editable){
+  return `
+    <div class="review-section" id="mc-section" style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
+      <div class="review-section-head">BE review <span class="review-section-who">${row.mc_name_raw || 'MC'}</span></div>
+      <div class="edit-grid">
+        <div class="field">
+          <label for="f-mc-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
+          <input type="number" step="0.01" id="f-mc-requested" value="${row.mc_requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
+        </div>
+        <div class="field full">
+          <label for="f-mc-notes">Notes <span class="optional-tag">(optional)</span></label>
+          <textarea id="f-mc-notes" ${editable ? '' : 'disabled'}>${row.mc_notes || ''}</textarea>
+        </div>
+      </div>
+      ${editable ? `
+      <div class="save-row">
+        <button class="btn secondary" id="mc-save-btn">Save BE entries</button>
+      </div>
+      <div class="review-action-bar">
+        <button class="btn-reviewed ${row.mc_reviewed ? 'is-reviewed':''}" id="mc-reviewed-btn">
+          ${row.mc_reviewed ? '<span class="tick">&#10003;</span> BE reviewed — click to undo' : 'Mark BE reviewed'}
+        </button>
+        <div class="review-action-note" id="mc-reviewed-note"></div>
+      </div>` : ''}
+    </div>`;
+}
+
 function renderDetailPanel(row){
   const el = document.getElementById('review-detail');
   if(!row){
@@ -834,15 +989,21 @@ function renderDetailPanel(row){
     return;
   }
   const editable = canEditRow(row);
+  const mepbe = isMepbeCx(row);
+
+  // Combined reviewed status pill for the header.
+  const revClass = reviewedClass(row);
+  const revLabel = reviewedLabel(row);
+
   el.innerHTML = `
     ${row.is_test ? `<div class="test-banner"><span><b>Test data.</b> This project row came from a test import and is not real billing data.</span></div>` : ''}
     <div class="panel-card">
       <div class="panel-head">
         <div class="titles">
-          <h2>${row.project_id} — ${row.description || ''}</h2>
-          <div class="meta"><b>${row.client || ''}</b>${row.project_status ? ' · ' + row.project_status : ''}<br>PM: ${row.pm_name_raw||'—'} · MC: ${row.mc_name_raw||'—'} · BM: ${row.bm_name_raw||'—'}</div>
+          <h2>${row.project_id} — ${row.description || ''}${mepbe ? ' <span class="mepbe-badge">MEPBE Cx</span>' : ''}</h2>
+          <div class="meta"><b>${row.client || ''}</b>${row.project_status ? ' · ' + row.project_status : ''}${row.project_type ? ' · ' + row.project_type : ''}<br>PM: ${row.pm_name_raw||'—'} · MC: ${row.mc_name_raw||'—'} · BM: ${row.bm_name_raw||'—'}</div>
         </div>
-        <span class="reviewed-pill ${row.reviewed ? 'yes':'no'}">${row.reviewed ? 'Reviewed' : 'Not reviewed'}</span>
+        <span class="reviewed-pill ${revClass}">${revLabel}</span>
       </div>
 
       <div class="stat-grid">
@@ -863,22 +1024,15 @@ function renderDetailPanel(row){
         </div>
       </div>
 
-      <fieldset id="edit-fields" ${editable ? '' : 'class="locked" disabled'} style="border:none;padding:0;margin:0;">
+      <!-- Shared fields: Action and Admin Notes -->
+      <fieldset ${editable ? '' : 'class="locked" disabled'} style="border:none;padding:0;margin:0 0 16px;">
         <div class="edit-grid">
-          <div class="field">
-            <label for="f-action">Project manager action <span class="required-tag">required</span></label>
+          <div class="field full">
+            <label for="f-action">Project manager action <span class="required-tag">required to mark reviewed</span></label>
             <select id="f-action">
               <option value="">— choose —</option>
               ${ACTIONS.map(a => `<option value="${a}" ${row.action===a?'selected':''}>${a}</option>`).join('')}
             </select>
-          </div>
-          <div class="field">
-            <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
-            <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}">
-          </div>
-          <div class="field full">
-            <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
-            <textarea id="f-notes">${row.notes || ''}</textarea>
           </div>
           ${state.isAdmin ? `
           <div class="field full">
@@ -886,93 +1040,237 @@ function renderDetailPanel(row){
             <textarea id="f-admin-notes">${row.admin_notes || ''}</textarea>
           </div>` : ''}
         </div>
+        ${editable ? `<div class="save-row" style="margin-top:8px;">
+          <button class="btn secondary" id="shared-save-btn">Save action${state.isAdmin ? ' / admin notes' : ''}</button>
+        </div>` : ''}
       </fieldset>
 
-      ${!editable
-        ? '<div class="locked-note">You can view this project, but only its Project Manager, Marketing Contact, Billing Manager, or an admin can edit it.</div>'
+      ${mepbe
+        ? pmReviewHtml(row, editable) + mcReviewHtml(row, editable)
         : `
-        <div class="save-row">
-          <button class="btn secondary" id="save-row-btn">Save without marking reviewed</button>
-          <span class="save-state" id="save-state"></span>
-        </div>
+        <!-- Standard single review section -->
+        <fieldset id="edit-fields" ${editable ? '' : 'class="locked" disabled'} style="border:none;padding:0;margin:0;">
+          <div class="edit-grid">
+            <div class="field">
+              <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
+              <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}">
+            </div>
+            <div class="field full">
+              <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
+              <textarea id="f-notes">${row.notes || ''}</textarea>
+            </div>
+          </div>
+        </fieldset>
+        ${!editable
+          ? '<div class="locked-note">You can view this project, but only its PM, MC, BM, or an admin can edit it.</div>'
+          : `
+          <div class="save-row">
+            <button class="btn secondary" id="save-row-btn">Save without marking reviewed</button>
+          </div>
+          <div class="review-action-bar">
+            <button class="btn-reviewed ${row.reviewed ? 'is-reviewed':''}" id="reviewed-btn">
+              ${row.reviewed ? '<span class="tick">&#10003;</span> Reviewed — click to undo' : 'Mark this project reviewed'}
+            </button>
+            <div class="review-action-note" id="reviewed-note"></div>
+          </div>`}
+      `}
 
-        <div class="review-action-bar">
-          <button class="btn-reviewed ${row.reviewed ? 'is-reviewed':''}" id="reviewed-btn">
-            ${row.reviewed ? '<span class="tick">&#10003;</span> Reviewed — click to undo' : 'Mark this project reviewed'}
-          </button>
-          <div class="review-action-note" id="reviewed-note"></div>
-        </div>`}
+      ${!editable && mepbe ? '<div class="locked-note">You can view this project, but only its PM, MC, BM, or an admin can edit it.</div>' : ''}
     </div>
+
+    ${mepbe && state.isAdmin ? `
+    <div class="panel-card" style="margin-top:12px;">
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:10px;color:var(--ink-soft);">Admin override</div>
+      <p class="sub" style="margin:0 0 10px;">If a reviewer is unavailable, you can mark either side reviewed on their behalf.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn secondary" id="admin-pm-reviewed-btn">${row.reviewed ? 'Undo MEP reviewed' : 'Mark MEP reviewed'}</button>
+        <button class="btn secondary" id="admin-mc-reviewed-btn">${row.mc_reviewed ? 'Undo BE reviewed' : 'Mark BE reviewed'}</button>
+      </div>
+    </div>` : ''}
   `;
 
   if(editable){
-    document.getElementById('save-row-btn').addEventListener('click', ()=> saveRow(row, {setReviewed:null}));
-    document.getElementById('reviewed-btn').addEventListener('click', ()=>{
-      if(row.reviewed){
-        saveRow(row, {setReviewed:false});
-      } else {
-        saveRow(row, {setReviewed:true});
-      }
+    // Shared save (Action + Admin Notes)
+    document.getElementById('shared-save-btn')?.addEventListener('click', ()=> saveShared(row));
+
+    if(mepbe){
+      document.getElementById('pm-save-btn')?.addEventListener('click', ()=> savePmFields(row, null));
+      document.getElementById('mc-save-btn')?.addEventListener('click', ()=> saveMcFields(row, null));
+      document.getElementById('pm-reviewed-btn')?.addEventListener('click', ()=> savePmFields(row, !row.reviewed));
+      document.getElementById('mc-reviewed-btn')?.addEventListener('click', ()=> saveMcFields(row, !row.mc_reviewed));
+      document.getElementById('f-action')?.addEventListener('change', ()=>{ refreshReviewedAffordance('pm'); refreshReviewedAffordance('mc'); });
+      refreshReviewedAffordance('pm');
+      refreshReviewedAffordance('mc');
+    } else {
+      document.getElementById('save-row-btn')?.addEventListener('click', ()=> saveRow(row, {setReviewed:null}));
+      document.getElementById('reviewed-btn')?.addEventListener('click', ()=> saveRow(row, {setReviewed: !row.reviewed}));
+      document.getElementById('f-action')?.addEventListener('change', ()=> refreshReviewedAffordance('standard'));
+      refreshReviewedAffordance('standard');
+    }
+  }
+
+  if(mepbe && state.isAdmin){
+    document.getElementById('admin-pm-reviewed-btn')?.addEventListener('click', ()=>{
+      saveAdminOverride(row, 'pm', !row.reviewed);
     });
-    document.getElementById('f-action').addEventListener('change', refreshReviewedAffordance);
-    refreshReviewedAffordance();
+    document.getElementById('admin-mc-reviewed-btn')?.addEventListener('click', ()=>{
+      saveAdminOverride(row, 'mc', !row.mc_reviewed);
+    });
   }
 }
 
-// The Action field is required in order to MARK REVIEWED, but not to save a
-// draft, so the reviewed button reflects whether that requirement is met yet.
-function refreshReviewedAffordance(){
+function refreshReviewedAffordance(which){
   const actionEl = document.getElementById('f-action');
-  const btn = document.getElementById('reviewed-btn');
-  const note = document.getElementById('reviewed-note');
-  if(!actionEl || !btn) return;
-  const row = state.rows.find(r => r.id === state.selectedRowId);
-  if(row && row.reviewed){
-    btn.disabled = false;
-    note.textContent = 'Saved as reviewed. Click above to reopen it for changes.';
-    note.classList.remove('blocked');
+  const hasAction = !!(actionEl && actionEl.value);
+
+  if(which === 'standard'){
+    const btn = document.getElementById('reviewed-btn');
+    const note = document.getElementById('reviewed-note');
+    if(!btn) return;
+    const row = state.rows.find(r => r.id === state.selectedRowId);
+    if(row && row.reviewed){
+      btn.disabled = false;
+      note.textContent = 'Saved as reviewed. Click above to reopen it for changes.';
+      note.classList.remove('blocked');
+    } else {
+      btn.disabled = !hasAction;
+      note.textContent = hasAction ? 'This saves your entries and marks the project reviewed.' : 'Choose a Project manager action above before marking this reviewed.';
+      note.classList.toggle('blocked', !hasAction);
+    }
     return;
   }
-  const hasAction = !!actionEl.value;
-  btn.disabled = !hasAction;
-  note.textContent = hasAction
-    ? 'This saves your entries and marks the project reviewed.'
-    : 'Choose a Project manager action above before marking this reviewed.';
-  note.classList.toggle('blocked', !hasAction);
+
+  if(which === 'pm'){
+    const btn = document.getElementById('pm-reviewed-btn');
+    const note = document.getElementById('pm-reviewed-note');
+    if(!btn) return;
+    const row = state.rows.find(r => r.id === state.selectedRowId);
+    if(row && row.reviewed){
+      btn.disabled = false;
+      note.textContent = 'MEP review saved. Click above to reopen.';
+      note.classList.remove('blocked');
+    } else {
+      btn.disabled = !hasAction;
+      note.textContent = hasAction ? 'Saves MEP entries and marks MEP reviewed.' : 'Choose a Project manager action above first.';
+      note.classList.toggle('blocked', !hasAction);
+    }
+    return;
+  }
+
+  if(which === 'mc'){
+    const btn = document.getElementById('mc-reviewed-btn');
+    const note = document.getElementById('mc-reviewed-note');
+    if(!btn) return;
+    const row = state.rows.find(r => r.id === state.selectedRowId);
+    if(row && row.mc_reviewed){
+      btn.disabled = false;
+      note.textContent = 'BE review saved. Click above to reopen.';
+      note.classList.remove('blocked');
+    } else {
+      btn.disabled = !hasAction;
+      note.textContent = hasAction ? 'Saves BE entries and marks BE reviewed.' : 'Choose a Project manager action above first.';
+      note.classList.toggle('blocked', !hasAction);
+    }
+  }
 }
 
+// Save shared fields: Action and (for admins) Admin Notes.
+async function saveShared(row){
+  const payload = {
+    action: document.getElementById('f-action').value || null,
+  };
+  if(state.isAdmin){
+    payload.admin_notes = document.getElementById('f-admin-notes')?.value || null;
+  }
+  const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
+  if(error){ toast('Save failed: ' + error.message, true); return; }
+  toast('Saved');
+  await loadRowsForMonth();
+  renderDetailPanel(state.rows.find(r => r.id === row.id));
+}
+
+// Save PM-side fields: Requested Bill Amount, Notes, and optionally Reviewed.
+async function savePmFields(row, setReviewed){
+  const action = document.getElementById('f-action').value || null;
+  if(setReviewed === true && !action){
+    toast('Choose a Project manager action before marking MEP reviewed', true);
+    return;
+  }
+  const payload = {
+    requested_bill_amount: parseFloat(document.getElementById('f-requested')?.value) || null,
+    notes: document.getElementById('f-notes')?.value || null,
+  };
+  if(setReviewed === true){
+    payload.reviewed = true; payload.reviewed_by = state.person.id; payload.reviewed_at = new Date().toISOString();
+  } else if(setReviewed === false){
+    payload.reviewed = false; payload.reviewed_by = null; payload.reviewed_at = null;
+  }
+  const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
+  if(error){ toast('Save failed: ' + error.message, true); return; }
+  toast(setReviewed === true ? 'MEP entries saved and marked reviewed' : setReviewed === false ? 'MEP review reopened' : 'MEP entries saved');
+  await loadRowsForMonth();
+  renderDetailPanel(state.rows.find(r => r.id === row.id));
+}
+
+// Save MC-side fields: MC Requested Bill Amount, MC Notes, and optionally MC Reviewed.
+async function saveMcFields(row, setReviewed){
+  const action = document.getElementById('f-action').value || null;
+  if(setReviewed === true && !action){
+    toast('Choose a Project manager action before marking BE reviewed', true);
+    return;
+  }
+  const payload = {
+    mc_requested_bill_amount: parseFloat(document.getElementById('f-mc-requested')?.value) || null,
+    mc_notes: document.getElementById('f-mc-notes')?.value || null,
+  };
+  if(setReviewed === true){
+    payload.mc_reviewed = true; payload.mc_reviewed_by = state.person.id; payload.mc_reviewed_at = new Date().toISOString();
+  } else if(setReviewed === false){
+    payload.mc_reviewed = false; payload.mc_reviewed_by = null; payload.mc_reviewed_at = null;
+  }
+  const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
+  if(error){ toast('Save failed: ' + error.message, true); return; }
+  toast(setReviewed === true ? 'BE entries saved and marked reviewed' : setReviewed === false ? 'BE review reopened' : 'BE entries saved');
+  await loadRowsForMonth();
+  renderDetailPanel(state.rows.find(r => r.id === row.id));
+}
+
+// Standard single-review save (non-MEPBE Cx projects).
 async function saveRow(row, {setReviewed} = {setReviewed:null}){
   const action = document.getElementById('f-action').value || null;
-
   if(setReviewed === true && !action){
     toast('Choose a Project manager action before marking this reviewed', true);
     return;
   }
-
   const payload = {
-    requested_bill_amount: parseFloat(document.getElementById('f-requested').value) || null,
+    requested_bill_amount: parseFloat(document.getElementById('f-requested')?.value) || null,
     action,
-    notes: document.getElementById('f-notes').value || null,
+    notes: document.getElementById('f-notes')?.value || null,
   };
-
   if(setReviewed === true){
-    payload.reviewed = true;
-    payload.reviewed_by = state.person.id;
-    payload.reviewed_at = new Date().toISOString();
+    payload.reviewed = true; payload.reviewed_by = state.person.id; payload.reviewed_at = new Date().toISOString();
   } else if(setReviewed === false){
-    payload.reviewed = false;
-    payload.reviewed_by = null;
-    payload.reviewed_at = null;
+    payload.reviewed = false; payload.reviewed_by = null; payload.reviewed_at = null;
   }
-  // setReviewed === null leaves the reviewed state exactly as it was.
-
   if(state.isAdmin){
-    payload.admin_notes = document.getElementById('f-admin-notes').value || null;
+    payload.admin_notes = document.getElementById('f-admin-notes')?.value || null;
   }
-
   const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
   if(error){ toast('Save failed: ' + error.message, true); return; }
   toast(setReviewed === true ? 'Saved and marked reviewed' : setReviewed === false ? 'Reopened for changes' : 'Saved');
+  await loadRowsForMonth();
+  renderDetailPanel(state.rows.find(r => r.id === row.id));
+}
+
+// Admin override: mark either the PM or MC side reviewed without going through
+// the normal edit flow, for cases where a reviewer is unavailable.
+async function saveAdminOverride(row, side, value){
+  const payload = side === 'pm'
+    ? { reviewed: value, reviewed_by: value ? state.person.id : null, reviewed_at: value ? new Date().toISOString() : null }
+    : { mc_reviewed: value, mc_reviewed_by: value ? state.person.id : null, mc_reviewed_at: value ? new Date().toISOString() : null };
+  const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
+  if(error){ toast('Save failed: ' + error.message, true); return; }
+  toast(value ? `${side === 'pm' ? 'MEP' : 'BE'} marked reviewed` : `${side === 'pm' ? 'MEP' : 'BE'} review undone`);
   await loadRowsForMonth();
   renderDetailPanel(state.rows.find(r => r.id === row.id));
 }
@@ -989,6 +1287,7 @@ const EXPECTED_HEADERS = {
   'Marketing Contact':'mc_name_raw',
   'Billing Manager':'bm_name_raw',
   'Project Status':'project_status',
+  'Project Type':'project_type',
   'Total Contract Amount':'total_contract_amount',
   'Billed':'billed',
   'Spent':'spent',
@@ -1106,6 +1405,7 @@ async function runImport(records, monthDate, isTest){
       description: rec.description, client: rec.client,
       pm_name_raw: rec.pm_name_raw, mc_name_raw: rec.mc_name_raw, bm_name_raw: rec.bm_name_raw,
       project_status: rec.project_status,
+      project_type: rec.project_type,
       total_contract_amount: rec.total_contract_amount, billed: rec.billed, spent: rec.spent,
       spend_remaining: rec.spend_remaining, bill_remaining: rec.bill_remaining, wip: rec.wip,
       active: true, is_test: isTest,
