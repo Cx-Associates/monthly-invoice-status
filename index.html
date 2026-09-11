@@ -786,7 +786,21 @@ function renderTable(){
       state.selectedRowId = Number(tr.dataset.id);
       renderTable();
       renderDetailPanel(state.rows.find(r => r.id === state.selectedRowId));
-      document.getElementById('review-detail').scrollTop = 0;
+      requestAnimationFrame(() => {
+        // Scroll whichever ancestor is actually overflowing — could be
+        // review-detail itself, or a parent, depending on screen size.
+        const detail = document.getElementById('review-detail');
+        detail.scrollTop = 0;
+        // Also try scrolling up through parents until we find one that was
+        // scrolled, covering narrow-screen stacked layout too.
+        let el = detail.parentElement;
+        while(el && el !== document.body){
+          if(el.scrollTop > 0){ el.scrollTop = 0; break; }
+          el = el.parentElement;
+        }
+        // Final fallback: the window itself.
+        window.scrollTo(0, 0);
+      });
     });
   });
 }
