@@ -786,6 +786,7 @@ function renderTable(){
       state.selectedRowId = Number(tr.dataset.id);
       renderTable();
       renderDetailPanel(state.rows.find(r => r.id === state.selectedRowId));
+      document.getElementById('review-detail').scrollTop = 0;
     });
   });
 }
