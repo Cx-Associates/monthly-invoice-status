@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Monthly Invoice Status — Cx Associates</title>
+<!-- Favicon: a banknote with wings ("flying money"), drawn as SVG rather than
+     using an emoji, because emoji favicons don't render reliably in Safari. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='16' y='22' width='36' height='23' rx='3' fill='%231F6F78'/%3E%3Crect x='20' y='26' width='28' height='15' rx='2' fill='none' stroke='%23A8D5D2' stroke-width='1.5'/%3E%3Ccircle cx='34' cy='33.5' r='5' fill='%23A8D5D2'/%3E%3Cpath d='M16 24 C9 17, 4 17, 1 20 C5 20, 8 23, 12 29 Z' fill='%238592A6'/%3E%3Cpath d='M16 33 C8 30, 3 31, 0 34 C4 34, 8 36, 13 38 Z' fill='%23AEB8C6'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -118,13 +121,22 @@
   .view{display:none;flex:1;overflow:auto;}
   .view.active{display:flex;flex-direction:column;}
 
-  /* ---------- Review view: top panel / bottom table ---------- */
+  /* ---------- Review view: list on the left, project detail on the right ---------- */
   #review-view{flex:1;min-height:0;}
-  .review-top{
-    flex:0 0 62%;overflow:auto;padding:20px 22px 14px;border-bottom:1px solid var(--line);
-    background:var(--bg);
+  .review-split{flex:1;min-height:0;display:flex;}
+  .review-list{
+    flex:0 0 44%;min-width:0;min-height:0;display:flex;flex-direction:column;
+    background:var(--panel);border-right:1px solid var(--line);
   }
-  .review-bottom{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--panel);}
+  .review-detail{
+    flex:1;min-width:0;min-height:0;overflow:auto;padding:16px 18px;background:var(--bg);
+  }
+  /* Below this width side-by-side stops being usable, so stack it instead. */
+  @media (max-width:1024px){
+    .review-split{flex-direction:column;}
+    .review-list{flex:0 0 45%;border-right:none;border-bottom:1px solid var(--line);}
+    .review-detail{flex:1;}
+  }
 
   .filters{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;
@@ -147,53 +159,97 @@
 
   .panel-card{
     background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:20px 22px;
+    padding:16px 18px;
   }
-  .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;}
-  .panel-head .titles h2{margin:0 0 2px;font-size:17px;font-weight:700;letter-spacing:-0.01em;}
-  .panel-head .titles .meta{font-size:12.5px;color:var(--ink-soft);}
+  .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;}
+  .panel-head .titles h2{margin:0 0 2px;font-size:15.5px;font-weight:700;letter-spacing:-0.01em;line-height:1.3;}
+  .panel-head .titles .meta{font-size:12px;color:var(--ink-soft);}
   .panel-head .meta b{color:var(--ink);}
   .reviewed-pill{
-    display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
-    padding:4px 10px;border-radius:20px;
+    display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;
+    padding:4px 10px;border-radius:20px;white-space:nowrap;
   }
   .reviewed-pill.yes{background:var(--good-soft);color:var(--good);}
   .reviewed-pill.no{background:var(--warn-soft);color:var(--warn);}
 
+  /* Six figures in two rows of three: fits the narrower right-hand column
+     far better than one row of six. */
   .stat-grid{
-    display:grid;grid-template-columns:repeat(6,1fr);gap:1px;
+    display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
     background:var(--line);border:1px solid var(--line);border-radius:4px;overflow:hidden;
-    margin-bottom:18px;
+    margin-bottom:14px;
   }
-  .stat-tile{background:#fff;padding:12px 12px;}
-  .stat-tile .lbl{font-size:11px;color:var(--ink-soft);margin-bottom:5px;}
-  .stat-tile .val{font-family:var(--font-mono);font-size:16px;font-weight:600;}
+  .stat-tile{background:#fff;padding:9px 11px;}
+  .stat-tile .lbl{font-size:10.5px;color:var(--ink-soft);margin-bottom:3px;}
+  .stat-tile .val{font-family:var(--font-mono);font-size:14.5px;font-weight:600;}
   .stat-tile.negative .val{color:var(--danger);}
   .stat-tile.wip .val{color:var(--accent);}
 
-  .chart-row{display:flex;gap:22px;margin-bottom:18px;align-items:flex-end;}
-  .chart-wrap{flex:0 0 260px;}
+  /* ---------- Reviewed action: deliberately the most prominent control ---------- */
+  .review-action-bar{
+    margin-top:16px;padding-top:16px;border-top:1px solid var(--line);
+  }
+  .btn-reviewed{
+    width:100%;display:flex;align-items:center;justify-content:center;gap:9px;
+    padding:13px 18px;border-radius:5px;font-size:14.5px;font-weight:700;
+    border:2px solid var(--good);background:var(--good);color:#fff;letter-spacing:-0.01em;
+  }
+  .btn-reviewed:hover{background:#25644a;border-color:#25644a;}
+  .btn-reviewed.is-reviewed{
+    background:var(--good-soft);color:var(--good);border-color:var(--good);
+  }
+  .btn-reviewed.is-reviewed:hover{background:#d8ebe0;}
+  .btn-reviewed:disabled{
+    background:var(--line-soft);border-color:var(--line);color:var(--ink-faint);cursor:not-allowed;
+  }
+  .btn-reviewed .tick{font-size:16px;line-height:1;}
+  .review-action-note{
+    font-size:12px;color:var(--ink-faint);text-align:center;margin-top:8px;
+  }
+  .review-action-note.blocked{color:var(--warn);font-weight:500;}
+  .save-row{display:flex;gap:9px;align-items:center;margin-top:10px;}
+  .save-row .btn{flex:0 0 auto;}
+  .save-state{font-size:12px;color:var(--ink-faint);}
+  .optional-tag{color:var(--ink-faint);font-weight:400;}
+  .required-tag{color:var(--danger);font-weight:600;}
+
+  /* ---------- Test data ---------- */
+  .test-badge{
+    display:inline-block;background:var(--warn-soft);color:var(--warn);
+    font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;
+    letter-spacing:0.03em;margin-left:6px;vertical-align:middle;
+  }
+  .test-banner{
+    background:var(--warn-soft);border:1px solid var(--warn);border-radius:var(--radius);
+    padding:11px 15px;margin-bottom:16px;font-size:13px;color:#8a561b;
+    display:flex;align-items:center;justify-content:space-between;gap:14px;
+  }
+  .test-banner b{color:var(--warn);}
+
+  .chart-row{display:flex;gap:14px;margin-bottom:14px;align-items:flex-end;flex-wrap:wrap;}
+  .chart-wrap{flex:1 1 200px;min-width:180px;}
   .chart-legend{flex:1;display:flex;gap:18px;flex-wrap:wrap;padding-bottom:6px;}
   .chart-legend .li{font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;}
   .chart-legend .sw{width:9px;height:9px;border-radius:2px;}
 
-  .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
   .edit-grid .full{grid-column:1/-1;}
   fieldset.locked{opacity:0.55;}
   .locked-note{font-size:12px;color:var(--ink-faint);margin-top:2px;}
 
-  table.data-table{width:100%;border-collapse:collapse;font-size:12.8px;}
+  table.data-table{width:100%;border-collapse:collapse;font-size:12.3px;}
   table.data-table thead th{
-    text-align:left;font-weight:600;color:var(--ink-soft);font-size:11.5px;
-    padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel);
+    text-align:left;font-weight:600;color:var(--ink-soft);font-size:11px;
+    padding:8px 11px;border-bottom:1px solid var(--line);background:var(--panel);
     position:sticky;top:0;cursor:pointer;white-space:nowrap;
   }
   table.data-table thead th:hover{color:var(--ink);}
-  table.data-table tbody td{padding:8px 14px;border-bottom:1px solid var(--line-soft);white-space:nowrap;}
+  table.data-table tbody td{padding:7px 11px;border-bottom:1px solid var(--line-soft);}
   table.data-table tbody tr{cursor:pointer;}
   table.data-table tbody tr:hover{background:var(--accent-soft);}
-  table.data-table tbody tr.selected{background:var(--accent-soft);}
-  table.data-table .num{font-family:var(--font-mono);text-align:right;}
+  table.data-table tbody tr.selected{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent);}
+  table.data-table .num{font-family:var(--font-mono);text-align:right;white-space:nowrap;}
+  table.data-table .desc-cell{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;}
   .status-dot.yes{background:var(--good);}
   .status-dot.no{background:var(--warn);}
@@ -329,28 +385,26 @@
         <input type="text" id="search-filter" placeholder="Search project, client...">
       </div>
 
-      <div class="review-top" id="review-top">
-        <div class="empty-state">Select a project below to review it.</div>
-      </div>
+      <div class="review-split">
+        <div class="review-list">
+          <div class="table-scroll">
+            <table class="data-table" id="project-table">
+              <thead>
+                <tr>
+                  <th data-sort="project_id">Project</th>
+                  <th data-sort="description">Description</th>
+                  <th data-sort="pm_name_raw">PM</th>
+                  <th data-sort="wip" class="num">WIP</th>
+                  <th data-sort="reviewed">Reviewed</th>
+                </tr>
+              </thead>
+              <tbody id="project-table-body"></tbody>
+            </table>
+          </div>
+        </div>
 
-      <div class="review-bottom">
-        <div class="table-scroll">
-          <table class="data-table" id="project-table">
-            <thead>
-              <tr>
-                <th data-sort="project_id">Project</th>
-                <th data-sort="client">Client</th>
-                <th data-sort="pm_name_raw">PM</th>
-                <th data-sort="mc_name_raw">Marketing contact</th>
-                <th data-sort="bm_name_raw">Billing mgr</th>
-                <th data-sort="wip" class="num">WIP</th>
-                <th data-sort="bill_remaining" class="num">Bill remaining</th>
-                <th data-sort="action">Action</th>
-                <th data-sort="reviewed">Reviewed</th>
-              </tr>
-            </thead>
-            <tbody id="project-table-body"></tbody>
-          </table>
+        <div class="review-detail" id="review-detail">
+          <div class="empty-state">Select a project from the list to review it.</div>
         </div>
       </div>
     </section>
@@ -359,17 +413,24 @@
     <section class="view" id="import-view">
       <div class="admin-view-inner">
         <h2>Monthly import</h2>
-        <p class="sub">Upload this month's Ajera export. Existing financial figures refresh by Project ID; any Requested Bill Amount, Action, Notes, or Reviewed status already entered for the month is left untouched.</p>
+        <p class="sub">Upload the raw Ajera export, no reformatting needed. Financial figures refresh by Project ID; any Requested Bill Amount, Action, Notes, or Reviewed status already entered for the month is left untouched.</p>
 
         <div class="drop-zone">
           <div class="field" style="max-width:220px;margin:0 auto 14px;text-align:left;">
             <label for="import-month">Month this import is for</label>
             <input type="month" id="import-month">
           </div>
+          <label class="checkbox-filter" style="justify-content:center;margin-bottom:14px;">
+            <input type="checkbox" id="import-is-test"> Mark this as test data
+          </label>
           <input type="file" id="import-file" accept=".xlsx,.xls">
         </div>
 
         <div id="import-preview"></div>
+
+        <h2 style="margin-top:30px;">Test data</h2>
+        <p class="sub">Anything imported with "Mark this as test data" checked is flagged throughout the tool and can be wiped in one click, without touching real imports.</p>
+        <div id="test-data-panel"></div>
       </div>
     </section>
 
@@ -590,7 +651,7 @@ async function loadMonths(){
 }
 
 async function loadRowsForMonth(){
-  if(!state.currentMonth){ state.rows = []; renderTable(); renderTopPanel(null); return; }
+  if(!state.currentMonth){ state.rows = []; renderTable(); renderDetailPanel(null); return; }
   const { data, error } = await sb.from('project_months').select('*').eq('month', state.currentMonth);
   if(error){ toast('Could not load projects: ' + error.message, true); return; }
   state.rows = data || [];
@@ -632,6 +693,7 @@ function wireTabs(){
     document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active', b===btn));
     document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id === btn.dataset.view + '-view'));
     if(btn.dataset.view === 'people') renderPeopleAdmin();
+    if(btn.dataset.view === 'import') renderTestDataPanel();
     if(btn.dataset.view === 'submissions') renderSubmissions();
   });
 }
@@ -675,19 +737,15 @@ function renderTable(){
   const rows = visibleRows();
   const body = document.getElementById('project-table-body');
   if(!rows.length){
-    body.innerHTML = `<tr><td colspan="9"><div class="empty-state">No projects match the current filters.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">No projects match the current filters.</div></td></tr>`;
     return;
   }
   body.innerHTML = rows.map(r => `
     <tr data-id="${r.id}" class="${r.id === state.selectedRowId ? 'selected' : ''}">
-      <td>${r.project_id}${!r.active ? ' <span class="flag-icon" title="No longer in the latest Ajera export">!</span>':''}</td>
-      <td>${r.client || ''}</td>
+      <td>${r.project_id}${!r.active ? ' <span class="flag-icon" title="No longer in the latest Ajera export">!</span>':''}${r.is_test ? '<span class="test-badge">TEST</span>':''}</td>
+      <td class="desc-cell" title="${(r.description||'').replace(/"/g,'&quot;')}">${r.description || ''}</td>
       <td>${r.pm_name_raw || ''}</td>
-      <td>${r.mc_name_raw || ''}</td>
-      <td>${r.bm_name_raw || ''}</td>
       <td class="num">${money(r.wip)}</td>
-      <td class="num">${money(r.bill_remaining)}</td>
-      <td>${r.action || ''}</td>
       <td><span class="status-dot ${r.reviewed ? 'yes':'no'}"></span>${r.reviewed ? 'Reviewed' : 'Pending'}</td>
     </tr>
   `).join('');
@@ -695,48 +753,49 @@ function renderTable(){
     tr.addEventListener('click', ()=>{
       state.selectedRowId = Number(tr.dataset.id);
       renderTable();
-      renderTopPanel(state.rows.find(r => r.id === state.selectedRowId));
+      renderDetailPanel(state.rows.find(r => r.id === state.selectedRowId));
     });
   });
 }
 
 /* ============================================================================
-   TOP PANEL — selected project
+   DETAIL PANEL — selected project (right-hand side)
    ============================================================================ */
 function barChartSvg(contract, billed, spent){
   const vals = [contract||0, billed||0, spent||0];
   const max = Math.max(...vals, 1);
   const labels = ['Contract','Billed','Spent'];
   const colors = ['#8592A6', '#1F6F78', '#C77D2E'];
-  const w = 260, h = 130, barW = 44, gap = 34, base = h - 22;
+  const w = 240, h = 112, barW = 40, gap = 30, base = h - 20;
   let bars = '';
   vals.forEach((v,i)=>{
-    const bh = Math.round((v/max) * (base-14));
-    const x = 20 + i*(barW+gap);
+    const bh = Math.round((v/max) * (base-12));
+    const x = 18 + i*(barW+gap);
     bars += `<rect x="${x}" y="${base-bh}" width="${barW}" height="${bh}" fill="${colors[i]}" rx="2"></rect>`;
-    bars += `<text x="${x+barW/2}" y="${base+14}" text-anchor="middle" font-size="10.5" fill="#4C5A73" font-family="Inter,sans-serif">${labels[i]}</text>`;
+    bars += `<text x="${x+barW/2}" y="${base+13}" text-anchor="middle" font-size="10" fill="#4C5A73" font-family="Inter,sans-serif">${labels[i]}</text>`;
   });
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="130">
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="112" preserveAspectRatio="xMidYMax meet">
     <line x1="0" y1="${base}" x2="${w}" y2="${base}" stroke="#D7DCE3" stroke-width="1"></line>
     ${bars}
   </svg>`;
 }
 
-function renderTopPanel(row){
-  const el = document.getElementById('review-top');
+function renderDetailPanel(row){
+  const el = document.getElementById('review-detail');
   if(!row){
-    el.innerHTML = `<div class="empty-state">Select a project below to review it.</div>`;
+    el.innerHTML = `<div class="empty-state">Select a project from the list to review it.</div>`;
     return;
   }
   const editable = canEditRow(row);
   el.innerHTML = `
+    ${row.is_test ? `<div class="test-banner"><span><b>Test data.</b> This project row came from a test import and is not real billing data.</span></div>` : ''}
     <div class="panel-card">
       <div class="panel-head">
         <div class="titles">
           <h2>${row.project_id} — ${row.description || ''}</h2>
-          <div class="meta"><b>${row.client || ''}</b>${row.project_status ? ' · ' + row.project_status : ''} · PM: ${row.pm_name_raw||'—'} · MC: ${row.mc_name_raw||'—'} · BM: ${row.bm_name_raw||'—'}</div>
+          <div class="meta"><b>${row.client || ''}</b>${row.project_status ? ' · ' + row.project_status : ''}<br>PM: ${row.pm_name_raw||'—'} · MC: ${row.mc_name_raw||'—'} · BM: ${row.bm_name_raw||'—'}</div>
         </div>
-        <span class="reviewed-pill ${row.reviewed ? 'yes':'no'}">${row.reviewed ? 'Reviewed' : 'Not yet reviewed'}</span>
+        <span class="reviewed-pill ${row.reviewed ? 'yes':'no'}">${row.reviewed ? 'Reviewed' : 'Not reviewed'}</span>
       </div>
 
       <div class="stat-grid">
@@ -760,66 +819,117 @@ function renderTopPanel(row){
       <fieldset id="edit-fields" ${editable ? '' : 'class="locked" disabled'} style="border:none;padding:0;margin:0;">
         <div class="edit-grid">
           <div class="field">
-            <label for="f-requested">Requested bill amount</label>
-            <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}">
-          </div>
-          <div class="field">
-            <label for="f-action">Project manager action</label>
+            <label for="f-action">Project manager action <span class="required-tag">required</span></label>
             <select id="f-action">
               <option value="">— choose —</option>
               ${ACTIONS.map(a => `<option value="${a}" ${row.action===a?'selected':''}>${a}</option>`).join('')}
             </select>
           </div>
+          <div class="field">
+            <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
+            <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}">
+          </div>
           <div class="field full">
-            <label for="f-notes">Notes</label>
+            <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
             <textarea id="f-notes">${row.notes || ''}</textarea>
           </div>
           ${state.isAdmin ? `
           <div class="field full">
-            <label for="f-admin-notes">Admin notes</label>
+            <label for="f-admin-notes">Admin notes <span class="optional-tag">(admins only)</span></label>
             <textarea id="f-admin-notes">${row.admin_notes || ''}</textarea>
           </div>` : ''}
-          <div class="field">
-            <label><input type="checkbox" id="f-reviewed" ${row.reviewed?'checked':''}> Mark this project reviewed</label>
-          </div>
         </div>
       </fieldset>
-      ${!editable ? '<div class="locked-note">You can view this project, but only its Project Manager, Marketing Contact, Billing Manager, or an admin can edit it.</div>' : ''}
-      <div style="margin-top:16px;">
-        <button class="btn" id="save-row-btn" ${editable ? '' : 'disabled'}>Save changes</button>
-      </div>
+
+      ${!editable
+        ? '<div class="locked-note">You can view this project, but only its Project Manager, Marketing Contact, Billing Manager, or an admin can edit it.</div>'
+        : `
+        <div class="save-row">
+          <button class="btn secondary" id="save-row-btn">Save without marking reviewed</button>
+          <span class="save-state" id="save-state"></span>
+        </div>
+
+        <div class="review-action-bar">
+          <button class="btn-reviewed ${row.reviewed ? 'is-reviewed':''}" id="reviewed-btn">
+            ${row.reviewed ? '<span class="tick">&#10003;</span> Reviewed — click to undo' : 'Mark this project reviewed'}
+          </button>
+          <div class="review-action-note" id="reviewed-note"></div>
+        </div>`}
     </div>
   `;
 
   if(editable){
-    document.getElementById('save-row-btn').addEventListener('click', ()=> saveRow(row));
+    document.getElementById('save-row-btn').addEventListener('click', ()=> saveRow(row, {setReviewed:null}));
+    document.getElementById('reviewed-btn').addEventListener('click', ()=>{
+      if(row.reviewed){
+        saveRow(row, {setReviewed:false});
+      } else {
+        saveRow(row, {setReviewed:true});
+      }
+    });
+    document.getElementById('f-action').addEventListener('change', refreshReviewedAffordance);
+    refreshReviewedAffordance();
   }
 }
 
-async function saveRow(row){
+// The Action field is required in order to MARK REVIEWED, but not to save a
+// draft, so the reviewed button reflects whether that requirement is met yet.
+function refreshReviewedAffordance(){
+  const actionEl = document.getElementById('f-action');
+  const btn = document.getElementById('reviewed-btn');
+  const note = document.getElementById('reviewed-note');
+  if(!actionEl || !btn) return;
+  const row = state.rows.find(r => r.id === state.selectedRowId);
+  if(row && row.reviewed){
+    btn.disabled = false;
+    note.textContent = 'Saved as reviewed. Click above to reopen it for changes.';
+    note.classList.remove('blocked');
+    return;
+  }
+  const hasAction = !!actionEl.value;
+  btn.disabled = !hasAction;
+  note.textContent = hasAction
+    ? 'This saves your entries and marks the project reviewed.'
+    : 'Choose a Project manager action above before marking this reviewed.';
+  note.classList.toggle('blocked', !hasAction);
+}
+
+async function saveRow(row, {setReviewed} = {setReviewed:null}){
+  const action = document.getElementById('f-action').value || null;
+
+  if(setReviewed === true && !action){
+    toast('Choose a Project manager action before marking this reviewed', true);
+    return;
+  }
+
   const payload = {
     requested_bill_amount: parseFloat(document.getElementById('f-requested').value) || null,
-    action: document.getElementById('f-action').value || null,
+    action,
     notes: document.getElementById('f-notes').value || null,
-    reviewed: document.getElementById('f-reviewed').checked,
   };
-  if(payload.reviewed && !row.reviewed){
+
+  if(setReviewed === true){
+    payload.reviewed = true;
     payload.reviewed_by = state.person.id;
     payload.reviewed_at = new Date().toISOString();
-  }
-  if(!payload.reviewed){
+  } else if(setReviewed === false){
+    payload.reviewed = false;
     payload.reviewed_by = null;
     payload.reviewed_at = null;
   }
+  // setReviewed === null leaves the reviewed state exactly as it was.
+
   if(state.isAdmin){
     payload.admin_notes = document.getElementById('f-admin-notes').value || null;
   }
+
   const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
   if(error){ toast('Save failed: ' + error.message, true); return; }
-  toast('Saved');
+  toast(setReviewed === true ? 'Saved and marked reviewed' : setReviewed === false ? 'Reopened for changes' : 'Saved');
   await loadRowsForMonth();
-  renderTopPanel(state.rows.find(r => r.id === row.id));
+  renderDetailPanel(state.rows.find(r => r.id === row.id));
 }
+
 
 /* ============================================================================
    IMPORT (admin)
@@ -915,22 +1025,25 @@ document.getElementById('import-file').addEventListener('change', async e=>{
     records.push(rec);
   }
 
-  renderImportPreview(records, monthDate);
+  const isTest = document.getElementById('import-is-test').checked;
+  renderImportPreview(records, monthDate, isTest);
 });
 
-function renderImportPreview(records, monthDate){
+function renderImportPreview(records, monthDate, isTest){
   const el = document.getElementById('import-preview');
   el.innerHTML = `
+    ${isTest ? `<div class="test-banner"><span><b>Test import.</b> These rows will be flagged as test data and can be wiped in one click later.</span></div>` : ''}
     <div class="import-summary">
       <div class="row"><span>Month</span><span class="n">${monthLabel(monthDate)}</span></div>
       <div class="row"><span>Rows parsed</span><span class="n">${records.length}</span></div>
+      <div class="row"><span>Import type</span><span class="n">${isTest ? 'TEST DATA' : 'Real data'}</span></div>
     </div>
     <button class="btn" id="confirm-import-btn">Confirm import</button>
   `;
-  document.getElementById('confirm-import-btn').addEventListener('click', ()=> runImport(records, monthDate));
+  document.getElementById('confirm-import-btn').addEventListener('click', ()=> runImport(records, monthDate, isTest));
 }
 
-async function runImport(records, monthDate){
+async function runImport(records, monthDate, isTest){
   const btn = document.getElementById('confirm-import-btn');
   btn.disabled = true; btn.textContent = 'Importing…';
 
@@ -948,7 +1061,7 @@ async function runImport(records, monthDate){
       project_status: rec.project_status,
       total_contract_amount: rec.total_contract_amount, billed: rec.billed, spent: rec.spent,
       spend_remaining: rec.spend_remaining, bill_remaining: rec.bill_remaining, wip: rec.wip,
-      active: true,
+      active: true, is_test: isTest,
     };
     const existing = existingById[rec.project_id];
     if(existing){
@@ -968,6 +1081,7 @@ async function runImport(records, monthDate){
   const { data: run } = await sb.from('import_runs').insert({
     month: monthDate, imported_by: state.person.id,
     row_count: records.length, new_project_count: newCount, unresolved_name_count: unresolved.length,
+    is_test: isTest,
   }).select().single();
 
   if(unresolved.length && run){
@@ -980,12 +1094,61 @@ async function runImport(records, monthDate){
       <div class="row"><span>Rows processed</span><span class="n">${records.length}</span></div>
       <div class="row"><span>New projects added</span><span class="n">${newCount}</span></div>
       <div class="row"><span>Unresolved names</span><span class="n">${unresolved.length}</span></div>
+      <div class="row"><span>Import type</span><span class="n">${isTest ? 'TEST DATA' : 'Real data'}</span></div>
     </div>
     ${unresolved.length ? `<p class="sub">See People &amp; aliases to map the unresolved names.</p>` : ''}
   `;
   toast('Import complete');
   await loadMonths();
   await loadDirectories();
+  await renderTestDataPanel();
+}
+
+/* ============================================================================
+   TEST DATA (admin) — one-click wipe of everything flagged as test data
+   ============================================================================ */
+async function renderTestDataPanel(){
+  const el = document.getElementById('test-data-panel');
+  if(!el) return;
+
+  const { data: testRows, error } = await sb
+    .from('project_months').select('id, month').eq('is_test', true);
+  if(error){
+    el.innerHTML = `<p class="sub">Could not check for test data: ${error.message}</p>`;
+    return;
+  }
+
+  const count = (testRows || []).length;
+  if(!count){
+    el.innerHTML = `<div class="import-summary"><div class="row"><span>Test rows currently stored</span><span class="n">0</span></div></div>`;
+    return;
+  }
+
+  const months = [...new Set(testRows.map(r => r.month))].sort();
+  el.innerHTML = `
+    <div class="test-banner">
+      <span><b>${count} test row${count===1?'':'s'}</b> currently stored, across: ${months.map(monthLabel).join(', ')}.</span>
+      <button class="btn danger" id="wipe-test-btn" style="white-space:nowrap;">Delete all test data</button>
+    </div>
+  `;
+  document.getElementById('wipe-test-btn').addEventListener('click', async ()=>{
+    if(!confirm(`Delete all ${count} test row${count===1?'':'s'}? Real imports are not affected. This cannot be undone.`)) return;
+    const btn = document.getElementById('wipe-test-btn');
+    btn.disabled = true; btn.textContent = 'Deleting…';
+
+    const del1 = await sb.from('project_months').delete().eq('is_test', true);
+    const del2 = await sb.from('import_runs').delete().eq('is_test', true);
+    if(del1.error || del2.error){
+      toast('Delete failed: ' + (del1.error?.message || del2.error?.message), true);
+      btn.disabled = false; btn.textContent = 'Delete all test data';
+      return;
+    }
+    toast('Test data deleted');
+    state.selectedRowId = null;
+    await loadMonths();
+    await renderTestDataPanel();
+    renderDetailPanel(null);
+  });
 }
 
 /* ============================================================================
