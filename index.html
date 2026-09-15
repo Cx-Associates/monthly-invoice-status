@@ -1112,11 +1112,6 @@ function renderDetailPanel(row){
               ${ACTIONS.map(a => `<option value="${a}" ${row.action===a?'selected':''}>${a}</option>`).join('')}
             </select>
           </div>
-          ${state.isAdmin ? `
-          <div class="field full">
-            <label for="f-admin-notes">Admin notes <span class="optional-tag">(admins only)</span></label>
-            <textarea id="f-admin-notes">${row.admin_notes || ''}</textarea>
-          </div>` : ''}
         </div>
 
       </fieldset>
@@ -1135,11 +1130,6 @@ function renderDetailPanel(row){
               <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
               <textarea id="f-notes">${row.notes || ''}</textarea>
             </div>
-            ${state.isAdmin ? `
-            <div class="field full">
-              <label for="f-admin-notes">Admin notes <span class="optional-tag">(admins only)</span></label>
-              <textarea id="f-admin-notes">${row.admin_notes || ''}</textarea>
-            </div>` : ''}
           </div>
         </fieldset>
         ${!editable
@@ -1164,6 +1154,14 @@ function renderDetailPanel(row){
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn secondary" id="admin-pm-reviewed-btn">${row.reviewed ? 'Undo MEP reviewed' : 'Mark MEP reviewed'}</button>
         <button class="btn secondary" id="admin-mc-reviewed-btn">${row.mc_reviewed ? 'Undo BE reviewed' : 'Mark BE reviewed'}</button>
+      </div>
+    </div>` : ''}
+
+    ${state.isAdmin && editable ? `
+    <div class="panel-card" style="margin-top:12px;">
+      <div class="field">
+        <label for="f-admin-notes">Admin notes <span class="optional-tag">(admins only)</span></label>
+        <textarea id="f-admin-notes">${row.admin_notes || ''}</textarea>
       </div>
     </div>` : ''}
   `;
