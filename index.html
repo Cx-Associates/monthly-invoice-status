@@ -574,9 +574,10 @@ let state = {
   activeOnly: true,
   myRoleFilter: 'pm',
   typeFilter: '',
-  isDirty: false,
-  autoSaving: false,
-  autoSaveTimer: null,
+  // Per-section dirty tracking so MEP and BE saves never stomp each other.
+  dirty: { shared: false, pm: false, mc: false, standard: false },
+  autoSaving: { shared: false, pm: false, mc: false, standard: false },
+  autoSaveTimer: { shared: null, pm: null, mc: null, standard: null },
   search: '',
   sortKey: 'project_id',
   sortDir: 1,
@@ -854,54 +855,78 @@ function visibleRows(){
 
 
 /* ============================================================================
-   DIRTY-TRACKING + AUTO-SAVE
-   Auto-saves 1.5s after the last change. On failure, flags it so the row-
-   click handler shows a confirmation dialog instead of silently losing work.
+   DIRTY-TRACKING + AUTO-SAVE (per section)
+   Each section (shared, pm, mc, standard) has its own dirty flag, debounce
+   timer, and save function. This ensures that if the MEP PM and the BE MC
+   are both editing the same MEPBE Cx project simultaneously, their saves
+   only touch their own columns and can never overwrite each other's work.
    ============================================================================ */
-let autoSaveFailed = false;
+let autoSaveFailed = { shared: false, pm: false, mc: false, standard: false };
 
-function markDirty(){
-  state.isDirty = true;
-  clearTimeout(state.autoSaveTimer);
-  state.autoSaveTimer = setTimeout(autoSave, 1500);
+function markDirty(section){
+  state.dirty[section] = true;
+  clearTimeout(state.autoSaveTimer[section]);
+  state.autoSaveTimer[section] = setTimeout(()=> autoSaveSection(section), 1500);
 }
 
-async function autoSave(){
-  if(state.autoSaving) return;
+async function autoSaveSection(section){
+  if(state.autoSaving[section]) return;
+  if(!state.dirty[section]) return;
   const row = state.rows.find(r => r.id === state.selectedRowId);
-  if(!row || !state.isDirty) return;
-  state.autoSaving = true;
-  const mepbe = isMepbeCx(row);
+  if(!row) return;
+  state.autoSaving[section] = true;
   try {
-    const payload = {};
+    const payload = buildPayload(section);
+    if(!Object.keys(payload).length){ state.dirty[section]=false; return; }
+    const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
+    if(error){
+      autoSaveFailed[section] = true;
+    } else {
+      state.dirty[section] = false;
+      autoSaveFailed[section] = false;
+      const { data } = await sb.from('project_months').select('*').eq('id', row.id).single();
+      if(data){ const idx=state.rows.findIndex(r=>r.id===row.id); if(idx>=0) state.rows[idx]=data; }
+      showAutoSaveIndicator();
+    }
+  } finally { state.autoSaving[section] = false; }
+}
+
+function buildPayload(section){
+  const payload = {};
+  const mepbe = isMepbeCx(state.rows.find(r => r.id === state.selectedRowId));
+  if(section === 'shared'){
     const action = document.getElementById('f-action');
     if(action) payload.action = action.value || null;
     if(state.isAdmin){
       const an = document.getElementById('f-admin-notes');
       if(an) payload.admin_notes = an.value || null;
     }
+  }
+  if(section === 'pm'){
     const req  = document.getElementById('f-requested');
     const note = document.getElementById('f-notes');
-    if(req)  payload.requested_bill_amount = parseFloat(req.value)  || null;
+    if(req)  payload.requested_bill_amount = parseFloat(req.value) || null;
     if(note) payload.notes = note.value || null;
-    if(mepbe){
-      const mcReq  = document.getElementById('f-mc-requested');
-      const mcNote = document.getElementById('f-mc-notes');
-      if(mcReq)  payload.mc_requested_bill_amount = parseFloat(mcReq.value) || null;
-      if(mcNote) payload.mc_notes = mcNote.value || null;
+  }
+  if(section === 'mc'){
+    const mcReq  = document.getElementById('f-mc-requested');
+    const mcNote = document.getElementById('f-mc-notes');
+    if(mcReq)  payload.mc_requested_bill_amount = parseFloat(mcReq.value) || null;
+    if(mcNote) payload.mc_notes = mcNote.value || null;
+  }
+  if(section === 'standard'){
+    const action = document.getElementById('f-action');
+    const req    = document.getElementById('f-requested');
+    const note   = document.getElementById('f-notes');
+    if(action) payload.action = action.value || null;
+    if(req)    payload.requested_bill_amount = parseFloat(req.value) || null;
+    if(note)   payload.notes = note.value || null;
+    if(state.isAdmin){
+      const an = document.getElementById('f-admin-notes');
+      if(an) payload.admin_notes = an.value || null;
     }
-    if(!Object.keys(payload).length){ state.isDirty=false; return; }
-    const { error } = await sb.from('project_months').update(payload).eq('id', row.id);
-    if(error){
-      autoSaveFailed = true;
-    } else {
-      state.isDirty = false;
-      autoSaveFailed = false;
-      const { data } = await sb.from('project_months').select('*').eq('id', row.id).single();
-      if(data){ const idx=state.rows.findIndex(r=>r.id===row.id); if(idx>=0) state.rows[idx]=data; }
-      showAutoSaveIndicator();
-    }
-  } finally { state.autoSaving = false; }
+  }
+  return payload;
 }
 
 function showAutoSaveIndicator(){
@@ -914,22 +939,35 @@ function showAutoSaveIndicator(){
 }
 
 function wireDirtyTracking(){
-  state.isDirty = false;
-  clearTimeout(state.autoSaveTimer);
-  document.querySelectorAll('#review-detail input, #review-detail textarea, #review-detail select')
-    .forEach(el => { el.addEventListener('input', markDirty); el.addEventListener('change', markDirty); });
+  ['shared','pm','mc','standard'].forEach(s=>{
+    state.dirty[s] = false;
+    clearTimeout(state.autoSaveTimer[s]);
+  });
+  const mepbe = isMepbeCx(state.rows.find(r => r.id === state.selectedRowId));
+  const fieldSections = mepbe
+    ? { 'f-action':'shared', 'f-requested':'pm', 'f-notes':'pm', 'f-mc-requested':'mc', 'f-mc-notes':'mc', 'f-admin-notes':'shared' }
+    : { 'f-action':'standard', 'f-requested':'standard', 'f-notes':'standard', 'f-admin-notes':'standard' };
+  Object.entries(fieldSections).forEach(([id, section])=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.addEventListener('input',  ()=> markDirty(section));
+    el.addEventListener('change', ()=> markDirty(section));
+  });
 }
 
 async function confirmSwitchRow(){
-  if(!state.isDirty && !autoSaveFailed) return true;
-  if(state.isDirty && !autoSaveFailed){
-    await autoSave();
-    if(!state.isDirty) return true;
+  const anyDirty  = Object.values(state.dirty).some(Boolean);
+  const anyFailed = Object.values(autoSaveFailed).some(Boolean);
+  if(!anyDirty && !anyFailed) return true;
+  if(anyDirty && !anyFailed){
+    await Promise.all(Object.keys(state.dirty).filter(s=>state.dirty[s]).map(s=>autoSaveSection(s)));
+    if(!Object.values(state.dirty).some(Boolean)) return true;
   }
-  const ok = confirm("Your changes couldn\'t be saved automatically. Switch projects anyway and lose your changes?");
-  if(ok){ state.isDirty=false; autoSaveFailed=false; }
+  const ok = confirm("Your changes couldn't be saved automatically. Switch projects anyway and lose your changes?");
+  if(ok){ ['shared','pm','mc','standard'].forEach(s=>{ state.dirty[s]=false; autoSaveFailed[s]=false; }); }
   return ok;
 }
+
 
 function renderTable(){
   const rows = visibleRows();
