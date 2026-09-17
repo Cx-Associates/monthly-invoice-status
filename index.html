@@ -87,7 +87,7 @@
   .hint-link{background:none;border:none;color:var(--accent-soft ? var(--accent):var(--accent));font-size:12.5px;padding:0;margin-top:12px;text-decoration:underline;}
 
   /* ---------- App shell ---------- */
-  #app-view{display:none;min-height:100vh;flex-direction:column;}
+  #app-view{display:none;height:100vh;flex-direction:column;}
   header.topbar{
     background:var(--panel);border-bottom:1px solid var(--line);
     padding:12px 22px;display:flex;align-items:center;justify-content:space-between;
@@ -415,6 +415,11 @@
         <select id="type-filter"><option value="">Project type: all</option></select>
         <label class="checkbox-filter"><input type="checkbox" id="wip-filter"> Has any WIP</label>
         <label class="checkbox-filter"><input type="checkbox" id="active-filter" checked> Active projects only</label>
+        <select id="reviewed-filter">
+          <option value="">Reviewed status: all</option>
+          <option value="yes">Reviewed</option>
+          <option value="no">Not yet reviewed</option>
+        </select>
         <input type="text" id="search-filter" placeholder="Search project, client...">
       </div>
 
@@ -572,6 +577,7 @@ let state = {
   bmFilter: '',
   wipOnly: false,
   activeOnly: true,
+  reviewedFilter: '',
   myRoleFilter: 'pm',
   typeFilter: '',
   // Per-section dirty tracking so MEP and BE saves never stomp each other.
@@ -584,6 +590,7 @@ let state = {
   peopleDirectory: [],     // all `people` rows
   aliasDirectory: [],      // all `name_aliases` rows
   unresolvedErrors: [],
+  wired: false,       // guards against double-attaching static event listeners across multiple boot() calls
 };
 
 const ACTIONS = [
@@ -612,17 +619,30 @@ function toast(msg, isError){
    AUTH
    ============================================================================ */
 document.getElementById('login-btn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('login-btn');
+  // Guard against a double-click (or an impatient second click while the
+  // request is still in flight) firing this handler twice. Without this,
+  // two concurrent signInWithPassword calls can both succeed and each call
+  // boot() independently, which double-wires the table's click handlers
+  // (see the `wired` guard in boot()) and makes things like column-header
+  // sort direction silently cancel itself out on every click thereafter.
+  if(btn.disabled) return;
+  btn.disabled = true;
   const email = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
   const errEl = document.getElementById('login-error');
   errEl.style.display = 'none';
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  if(error){
-    errEl.textContent = error.message;
-    errEl.style.display = 'block';
-    return;
+  try{
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if(error){
+      errEl.textContent = error.message;
+      errEl.style.display = 'block';
+      return;
+    }
+    await boot();
+  } finally {
+    btn.disabled = false;
   }
-  await boot();
 });
 
 document.getElementById('forgot-btn').addEventListener('click', async ()=>{
@@ -667,9 +687,18 @@ async function boot(){
 
   await loadDirectories();
   await loadMonths();
-  wireTabs();
-  wireFilters();
-  wireTableSort();
+  // boot() can legitimately run more than once in a session (login, then
+  // later a password-reset flow, etc.), but the elements these wire up
+  // (tabs, filter controls, sortable headers) are static and never get
+  // recreated. Re-attaching listeners to them a second time doesn't replace
+  // the first set, it stacks on top of it, so every click fires twice and
+  // e.g. a sort-direction toggle cancels itself out. Wire them exactly once.
+  if(!state.wired){
+    wireTabs();
+    wireFilters();
+    wireTableSort();
+    state.wired = true;
+  }
 }
 
 /* ============================================================================
@@ -789,6 +818,7 @@ function wireFilters(){
   document.getElementById('type-filter').addEventListener('change', e=>{ state.typeFilter = e.target.value; renderTable(); });
   document.getElementById('wip-filter').addEventListener('change', e=>{ state.wipOnly = e.target.checked; renderTable(); });
   document.getElementById('active-filter').addEventListener('change', e=>{ state.activeOnly = e.target.checked; renderTable(); });
+  document.getElementById('reviewed-filter').addEventListener('change', e=>{ state.reviewedFilter = e.target.value; renderTable(); });
   document.getElementById('search-filter').addEventListener('input', e=>{ state.search = e.target.value.toLowerCase(); renderTable(); });
 }
 
@@ -836,6 +866,7 @@ function visibleRows(){
   if(state.typeFilter) rows = rows.filter(r => r.project_type === state.typeFilter);
   if(state.wipOnly) rows = rows.filter(r => (r.wip || 0) > 0);
   if(state.activeOnly) rows = rows.filter(r => !r.project_status || r.project_status.toLowerCase() === 'active');
+  if(state.reviewedFilter) rows = rows.filter(r => reviewedClass(r) === state.reviewedFilter);
   if(state.search){
     const s = state.search;
     rows = rows.filter(r =>
@@ -1056,11 +1087,11 @@ function pmReviewHtml(row, editable){
       <div class="edit-grid">
         <div class="field">
           <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
-          <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
+          <input type="number" step="0.01" id="f-requested" autocomplete="off" value="${row.requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
         </div>
         <div class="field full">
           <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
-          <textarea id="f-notes" ${editable ? '' : 'disabled'}>${row.notes || ''}</textarea>
+          <textarea id="f-notes" autocomplete="off" ${editable ? '' : 'disabled'}>${row.notes || ''}</textarea>
         </div>
       </div>
       ${editable ? `
@@ -1081,11 +1112,11 @@ function mcReviewHtml(row, editable){
       <div class="edit-grid">
         <div class="field">
           <label for="f-mc-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
-          <input type="number" step="0.01" id="f-mc-requested" value="${row.mc_requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
+          <input type="number" step="0.01" id="f-mc-requested" autocomplete="off" value="${row.mc_requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
         </div>
         <div class="field full">
           <label for="f-mc-notes">Notes <span class="optional-tag">(optional)</span></label>
-          <textarea id="f-mc-notes" ${editable ? '' : 'disabled'}>${row.mc_notes || ''}</textarea>
+          <textarea id="f-mc-notes" autocomplete="off" ${editable ? '' : 'disabled'}>${row.mc_notes || ''}</textarea>
         </div>
       </div>
       ${editable ? `
@@ -1110,6 +1141,16 @@ function renderDetailPanel(row){
   // Combined reviewed status pill for the header.
   const revClass = reviewedClass(row);
   const revLabel = reviewedLabel(row);
+
+  // If nobody has picked an action yet and WIP is below $500, default the
+  // dropdown to "< 500 - BILL WITH GOOD REASON" as a time-saver. This never
+  // overrides an action someone has already chosen and saved — it only
+  // fills the blank state. The actual save functions read this select's
+  // live value, so the default is captured whether or not the PM touches
+  // the dropdown before clicking Mark reviewed.
+  const LOW_WIP_ACTION = '< 500 - BILL WITH GOOD REASON';
+  const effectiveAction = row.action
+    || (row.wip != null && !isNaN(row.wip) && row.wip < 500 ? LOW_WIP_ACTION : '');
 
   el.innerHTML = `
     ${row.is_test ? `<div class="test-banner"><span><b>Test data.</b> This project row came from a test import and is not real billing data.</span></div>` : ''}
@@ -1147,7 +1188,7 @@ function renderDetailPanel(row){
             <label for="f-action">Project manager action <span class="required-tag">required to mark reviewed</span></label>
             <select id="f-action">
               <option value="">— choose —</option>
-              ${ACTIONS.map(a => `<option value="${a}" ${row.action===a?'selected':''}>${a}</option>`).join('')}
+              ${ACTIONS.map(a => `<option value="${a}" ${effectiveAction===a?'selected':''}>${a}</option>`).join('')}
             </select>
           </div>
         </div>
@@ -1162,11 +1203,11 @@ function renderDetailPanel(row){
           <div class="edit-grid">
             <div class="field">
               <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
-              <input type="number" step="0.01" id="f-requested" value="${row.requested_bill_amount ?? ''}">
+              <input type="number" step="0.01" id="f-requested" autocomplete="off" value="${row.requested_bill_amount ?? ''}">
             </div>
             <div class="field full">
               <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
-              <textarea id="f-notes">${row.notes || ''}</textarea>
+              <textarea id="f-notes" autocomplete="off">${row.notes || ''}</textarea>
             </div>
           </div>
         </fieldset>
@@ -1199,7 +1240,7 @@ function renderDetailPanel(row){
     <div class="panel-card" style="margin-top:12px;">
       <div class="field">
         <label for="f-admin-notes">Admin notes <span class="optional-tag">(admins only)</span></label>
-        <textarea id="f-admin-notes">${row.admin_notes || ''}</textarea>
+        <textarea id="f-admin-notes" autocomplete="off">${row.admin_notes || ''}</textarea>
       </div>
     </div>` : ''}
   `;
