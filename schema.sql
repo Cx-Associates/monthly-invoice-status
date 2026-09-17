@@ -68,6 +68,10 @@ create table project_months (
   reviewed boolean not null default false,
   reviewed_by uuid references people(id),
   reviewed_at timestamptz,
+  bill_ahead_amount numeric,            -- PM-entered. What was billed ahead of WIP/Spent
+                                         -- this month (lump-sum "bill ahead" decisions).
+                                         -- Later months look back across prior rows for
+                                         -- this project_id to surface a reminder banner.
 
   -- MC-entered fields, used only for MEPBE Cx projects where the MC has an
   -- independent review responsibility. On all other project types these stay
@@ -77,6 +81,8 @@ create table project_months (
   mc_reviewed boolean not null default false,
   mc_reviewed_by uuid references people(id),
   mc_reviewed_at timestamptz,
+  mc_bill_ahead_amount numeric,         -- MC-entered counterpart to bill_ahead_amount,
+                                         -- for the BE side of a MEPBE Cx project.
 
   updated_at timestamptz not null default now(),
   unique (project_id, month)
@@ -243,6 +249,7 @@ begin
       NEW.reviewed              := OLD.reviewed;
       NEW.reviewed_by           := OLD.reviewed_by;
       NEW.reviewed_at           := OLD.reviewed_at;
+      NEW.bill_ahead_amount     := OLD.bill_ahead_amount;
     end if;
 
     if not v_is_mc then
@@ -251,6 +258,7 @@ begin
       NEW.mc_reviewed              := OLD.mc_reviewed;
       NEW.mc_reviewed_by           := OLD.mc_reviewed_by;
       NEW.mc_reviewed_at           := OLD.mc_reviewed_at;
+      NEW.mc_bill_ahead_amount     := OLD.mc_bill_ahead_amount;
     end if;
   end if;
 

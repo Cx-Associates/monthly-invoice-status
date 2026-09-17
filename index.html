@@ -170,7 +170,8 @@
     padding:4px 10px;border-radius:20px;white-space:nowrap;
   }
   .reviewed-pill.yes{background:var(--good-soft);color:var(--good);}
-  .reviewed-pill.no{background:var(--warn-soft);color:var(--warn);}
+  .reviewed-pill.no{background:var(--danger-soft);color:var(--danger);}
+  .reviewed-pill.partial{background:var(--warn-soft);color:var(--warn);}
 
   /* Six figures in two rows of three: fits the narrower right-hand column
      far better than one row of six. */
@@ -245,6 +246,12 @@
   }
   .test-banner b{color:var(--warn);}
 
+  .bill-ahead-banner{
+    background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius);
+    padding:11px 15px;margin-bottom:16px;font-size:13px;color:var(--accent);
+  }
+  .bill-ahead-banner b{color:var(--accent);}
+
   .chart-row{display:flex;gap:14px;margin-bottom:14px;align-items:flex-end;flex-wrap:wrap;}
   .chart-wrap{flex:1 1 200px;min-width:180px;}
   .chart-legend{flex:1;display:flex;gap:18px;flex-wrap:wrap;padding-bottom:6px;}
@@ -271,7 +278,8 @@
   table.data-table .desc-cell{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;}
   .status-dot.yes{background:var(--good);}
-  .status-dot.no{background:var(--warn);}
+  .status-dot.no{background:var(--danger);}
+  .status-dot.partial{background:var(--warn);}
   .flag-icon{color:var(--danger);font-weight:700;margin-left:5px;cursor:help;}
   .table-scroll{flex:1;overflow:auto;}
 
@@ -417,8 +425,9 @@
         <label class="checkbox-filter"><input type="checkbox" id="active-filter" checked> Active projects only</label>
         <select id="reviewed-filter">
           <option value="">Reviewed status: all</option>
-          <option value="yes">Reviewed</option>
-          <option value="no">Not yet reviewed</option>
+          <option value="yes">Review(s) complete</option>
+          <option value="partial">Partially reviewed</option>
+          <option value="no">Not reviewed</option>
         </select>
         <input type="text" id="search-filter" placeholder="Search project, client...">
       </div>
@@ -936,22 +945,28 @@ function buildPayload(section){
   if(section === 'pm'){
     const req  = document.getElementById('f-requested');
     const note = document.getElementById('f-notes');
+    const ba   = document.getElementById('f-bill-ahead');
     if(req)  payload.requested_bill_amount = parseFloat(req.value) || null;
     if(note) payload.notes = note.value || null;
+    if(ba)   payload.bill_ahead_amount = parseFloat(ba.value) || null;
   }
   if(section === 'mc'){
     const mcReq  = document.getElementById('f-mc-requested');
     const mcNote = document.getElementById('f-mc-notes');
+    const mcBa   = document.getElementById('f-mc-bill-ahead');
     if(mcReq)  payload.mc_requested_bill_amount = parseFloat(mcReq.value) || null;
     if(mcNote) payload.mc_notes = mcNote.value || null;
+    if(mcBa)   payload.mc_bill_ahead_amount = parseFloat(mcBa.value) || null;
   }
   if(section === 'standard'){
     const action = document.getElementById('f-action');
     const req    = document.getElementById('f-requested');
     const note   = document.getElementById('f-notes');
+    const ba     = document.getElementById('f-bill-ahead');
     if(action) payload.action = action.value || null;
     if(req)    payload.requested_bill_amount = parseFloat(req.value) || null;
     if(note)   payload.notes = note.value || null;
+    if(ba)     payload.bill_ahead_amount = parseFloat(ba.value) || null;
     if(state.isAdmin){
       const an = document.getElementById('f-admin-notes');
       if(an) payload.admin_notes = an.value || null;
@@ -976,8 +991,8 @@ function wireDirtyTracking(){
   });
   const mepbe = isMepbeCx(state.rows.find(r => r.id === state.selectedRowId));
   const fieldSections = mepbe
-    ? { 'f-action':'shared', 'f-requested':'pm', 'f-notes':'pm', 'f-mc-requested':'mc', 'f-mc-notes':'mc', 'f-admin-notes':'shared' }
-    : { 'f-action':'standard', 'f-requested':'standard', 'f-notes':'standard', 'f-admin-notes':'standard' };
+    ? { 'f-action':'shared', 'f-requested':'pm', 'f-notes':'pm', 'f-bill-ahead':'pm', 'f-mc-requested':'mc', 'f-mc-notes':'mc', 'f-mc-bill-ahead':'mc', 'f-admin-notes':'shared' }
+    : { 'f-action':'standard', 'f-requested':'standard', 'f-notes':'standard', 'f-bill-ahead':'standard', 'f-admin-notes':'standard' };
   Object.entries(fieldSections).forEach(([id, section])=>{
     const el = document.getElementById(id);
     if(!el) return;
@@ -1066,17 +1081,22 @@ function barChartSvg(contract, billed, spent){
 
 // Returns a human-readable combined reviewed status for the table column.
 function reviewedLabel(row){
-  if(!isMepbeCx(row)) return row.reviewed ? 'Reviewed' : 'Pending';
+  if(!isMepbeCx(row)) return row.reviewed ? 'Review(s) Complete' : 'Not Reviewed';
   const pm = row.reviewed, mc = row.mc_reviewed;
-  if(pm && mc) return 'Both reviewed';
-  if(pm)       return 'PM reviewed';
-  if(mc)       return 'MC reviewed';
-  return 'Neither reviewed';
+  if(pm && mc) return 'Review(s) Complete';
+  if(pm)       return 'MEP Reviewed';
+  if(mc)       return 'BE Reviewed';
+  return 'Not Reviewed';
 }
 
+// 'yes' = fully done (green), 'partial' = one side of a MEPBE Cx project
+// done but not the other (amber — still needs someone else's review),
+// 'no' = nothing done yet (red).
 function reviewedClass(row){
   if(!isMepbeCx(row)) return row.reviewed ? 'yes' : 'no';
-  return (row.reviewed && row.mc_reviewed) ? 'yes' : 'no';
+  if(row.reviewed && row.mc_reviewed) return 'yes';
+  if(row.reviewed || row.mc_reviewed) return 'partial';
+  return 'no';
 }
 
 // Renders the PM review section (always shown).
@@ -1088,6 +1108,10 @@ function pmReviewHtml(row, editable){
         <div class="field">
           <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
           <input type="number" step="0.01" id="f-requested" autocomplete="off" value="${row.requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
+        </div>
+        <div class="field">
+          <label for="f-bill-ahead">Bill ahead this month <span class="optional-tag">(optional)</span></label>
+          <input type="number" step="0.01" id="f-bill-ahead" autocomplete="off" value="${row.bill_ahead_amount ?? ''}" ${editable ? '' : 'disabled'}>
         </div>
         <div class="field full">
           <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
@@ -1113,6 +1137,10 @@ function mcReviewHtml(row, editable){
         <div class="field">
           <label for="f-mc-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
           <input type="number" step="0.01" id="f-mc-requested" autocomplete="off" value="${row.mc_requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
+        </div>
+        <div class="field">
+          <label for="f-mc-bill-ahead">Bill ahead this month <span class="optional-tag">(optional)</span></label>
+          <input type="number" step="0.01" id="f-mc-bill-ahead" autocomplete="off" value="${row.mc_bill_ahead_amount ?? ''}" ${editable ? '' : 'disabled'}>
         </div>
         <div class="field full">
           <label for="f-mc-notes">Notes <span class="optional-tag">(optional)</span></label>
@@ -1154,6 +1182,7 @@ function renderDetailPanel(row){
 
   el.innerHTML = `
     ${row.is_test ? `<div class="test-banner"><span><b>Test data.</b> This project row came from a test import and is not real billing data.</span></div>` : ''}
+    <div id="bill-ahead-banner"></div>
     <div class="panel-card">
       <div class="panel-head">
         <div class="titles">
@@ -1205,6 +1234,10 @@ function renderDetailPanel(row){
               <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
               <input type="number" step="0.01" id="f-requested" autocomplete="off" value="${row.requested_bill_amount ?? ''}">
             </div>
+            <div class="field">
+              <label for="f-bill-ahead">Bill ahead this month <span class="optional-tag">(optional)</span></label>
+              <input type="number" step="0.01" id="f-bill-ahead" autocomplete="off" value="${row.bill_ahead_amount ?? ''}">
+            </div>
             <div class="field full">
               <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
               <textarea id="f-notes" autocomplete="off">${row.notes || ''}</textarea>
@@ -1245,6 +1278,8 @@ function renderDetailPanel(row){
     </div>` : ''}
   `;
 
+  loadBillAheadHistory(row);
+
   if(editable){
     if(mepbe){
       document.getElementById('pm-reviewed-btn')?.addEventListener('click', ()=> savePmFields(row, !row.reviewed));
@@ -1268,6 +1303,39 @@ function renderDetailPanel(row){
     });
   }
   if(editable) requestAnimationFrame(wireDirtyTracking);
+}
+
+// Looks up this project's bill-ahead history from *prior* months (any
+// month strictly before the one currently loaded) and, if any exist, fills
+// in the reminder banner at the top of the panel. Runs asynchronously and
+// patches the DOM in once it resolves, since it's a separate round trip
+// from the row data already on screen. Guards against a stale response
+// landing after the person has already switched to a different project.
+async function loadBillAheadHistory(row){
+  const forRowId = row.id;
+  const { data, error } = await sb
+    .from('project_months')
+    .select('month, bill_ahead_amount, mc_bill_ahead_amount')
+    .eq('project_id', row.project_id)
+    .lt('month', row.month)
+    .order('month');
+  if(state.selectedRowId !== forRowId) return; // they've moved on to another row
+  const banner = document.getElementById('bill-ahead-banner');
+  if(!banner) return;
+  if(error || !data || !data.length){ banner.innerHTML = ''; return; }
+  // Combine both sides (MEP's bill_ahead_amount and BE's mc_bill_ahead_amount)
+  // into one per-month figure, since the reminder is about the project's
+  // overall billing history, not which discipline drove it.
+  const entries = data
+    .map(d => ({ month: d.month, amount: (Number(d.bill_ahead_amount) || 0) + (Number(d.mc_bill_ahead_amount) || 0) }))
+    .filter(e => e.amount);
+  if(!entries.length){ banner.innerHTML = ''; return; }
+  const total = entries.reduce((sum, e) => sum + e.amount, 0);
+  const last = entries[entries.length - 1];
+  banner.innerHTML = `<div class="bill-ahead-banner">
+    <b>Reminder — billed ahead before:</b> ${money(total)} total across ${entries.length} prior month${entries.length>1?'s':''}
+    (most recent: ${money(last.amount)} in ${monthLabel(last.month)}).
+  </div>`;
 }
 
 function refreshReviewedAffordance(which){
