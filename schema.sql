@@ -188,9 +188,18 @@ create policy errors_admin on import_errors
 -- ============================================================================
 -- Column protection: a non-admin can update a row (per the policy above) but
 -- must never be able to touch the Ajera-sourced fields, project identity, or
--- another admin's notes — only their own review fields. This trigger silently
--- reverts any protected column to its previous value if the person updating
--- isn't an admin, regardless of what the client sends.
+-- another admin's notes. This trigger silently reverts any protected column
+-- to its previous value if the person updating isn't an admin, regardless of
+-- what the client sends.
+--
+-- The RLS policy above already limits *who* can update a row at all (PM,
+-- MC, BM, or admin). This trigger doesn't further split MEP-side vs BE-side
+-- review fields by role — anyone named as PM, MC, or BM on the row can write
+-- any of the review fields, on both standard and MEPBE Cx projects. That's a
+-- deliberate simplicity choice: the risk of one reviewer overwriting the
+-- other's entry is low, and any of them stepping on another's work is easy
+-- to fix by hand, so it's not worth the column-level complexity of a stricter
+-- per-role split.
 -- ============================================================================
 create or replace function protect_project_months_columns()
 returns trigger
@@ -202,6 +211,7 @@ declare
   v_is_admin boolean;
   v_is_pm    boolean;
   v_is_mc    boolean;
+  v_is_bm    boolean;
 begin
   v_is_admin := is_admin();
 
@@ -226,8 +236,10 @@ begin
     NEW.is_test                 := OLD.is_test;
     NEW.admin_notes             := OLD.admin_notes;
 
-    -- Work out whether the caller is the PM or the MC on this row, so we
-    -- can enforce which review fields each party is allowed to touch.
+    -- Work out whether the caller is named as PM, MC, or BM on this row.
+    -- (RLS above already required them to be one of these, or admin, to
+    -- reach this trigger at all — this is just confirming which, so the
+    -- fallback branch below is mostly a defensive no-op.)
     select exists(
       select 1 from name_aliases na
       where na.person_id = auth.uid()
@@ -240,19 +252,20 @@ begin
         and lower(na.alias) = lower(OLD.mc_name_raw)
     ) into v_is_mc;
 
-    -- PM cannot overwrite the MC's review fields, and vice versa.
-    -- If someone is both PM and MC on a row (edge case), they can edit both.
-    if not v_is_pm then
-      NEW.requested_bill_amount := OLD.requested_bill_amount;
-      NEW.action                := OLD.action;
-      NEW.notes                 := OLD.notes;
-      NEW.reviewed              := OLD.reviewed;
-      NEW.reviewed_by           := OLD.reviewed_by;
-      NEW.reviewed_at           := OLD.reviewed_at;
-      NEW.bill_ahead_amount     := OLD.bill_ahead_amount;
-    end if;
+    select exists(
+      select 1 from name_aliases na
+      where na.person_id = auth.uid()
+        and lower(na.alias) = lower(OLD.bm_name_raw)
+    ) into v_is_bm;
 
-    if not v_is_mc then
+    if not (v_is_pm or v_is_mc or v_is_bm) then
+      NEW.action                   := OLD.action;
+      NEW.requested_bill_amount    := OLD.requested_bill_amount;
+      NEW.notes                    := OLD.notes;
+      NEW.reviewed                 := OLD.reviewed;
+      NEW.reviewed_by              := OLD.reviewed_by;
+      NEW.reviewed_at              := OLD.reviewed_at;
+      NEW.bill_ahead_amount        := OLD.bill_ahead_amount;
       NEW.mc_requested_bill_amount := OLD.mc_requested_bill_amount;
       NEW.mc_notes                 := OLD.mc_notes;
       NEW.mc_reviewed              := OLD.mc_reviewed;
