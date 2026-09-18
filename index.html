@@ -257,7 +257,6 @@
   .chart-legend{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;margin-top:4px;}
   .chart-legend .li{font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;}
   .chart-legend .sw{width:9px;height:9px;border-radius:2px;}
-  .chart-legend .sw.line{background:transparent;border-top:2px dashed #4C5A73;height:0;border-radius:0;}
 
   .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
   .edit-grid .full{grid-column:1/-1;}
@@ -1102,19 +1101,21 @@ function barChartSvg(contract, billed, spent){
   });
 
   // Dashed reference line at the Total Contract height, drawn on top of the
-  // bars with its own end label, so it's easy to see at a glance whenever
-  // Billed or Spent has run past the contract amount (mirrors the
-  // reference-line style Ajera uses on similar charts). Skipped when
-  // there's no contract amount to plot.
+  // bars, so it's easy to see at a glance whenever Billed or Spent has run
+  // past the contract amount (mirrors the reference-line style Ajera uses
+  // on similar charts). Skipped when there's no contract amount to plot.
   let contractLine = '';
   if(c > 0){
     const cy = base - Math.round((c/max) * barMaxH);
-    contractLine = `
-      <line x1="2" y1="${cy}" x2="${w-2}" y2="${cy}" stroke="#4C5A73" stroke-width="1.5" stroke-dasharray="4,3"></line>
-      <text x="${w-2}" y="${cy - 4}" text-anchor="end" font-size="9.5" fill="#4C5A73" font-family="Inter,sans-serif">Contract line</text>`;
+    contractLine = `<line x1="2" y1="${cy}" x2="${w-2}" y2="${cy}" stroke="#4C5A73" stroke-width="1.5" stroke-dasharray="4,3"></line>`;
   }
 
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMax meet">
+  // width:100%/height:auto + aspect-ratio (rather than a fixed pixel height
+  // attribute) is what actually lets this fill the width of its container —
+  // a fixed height combined with preserveAspectRatio "meet" was capping the
+  // chart at its native small size and padding the leftover width with
+  // empty space instead of scaling up into it.
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;aspect-ratio:${w}/${h};display:block;">
     <line x1="0" y1="${base}" x2="${w}" y2="${base}" stroke="#D7DCE3" stroke-width="1"></line>
     ${bars}
     ${contractLine}
@@ -1249,7 +1250,6 @@ function renderDetailPanel(row){
           <div class="li"><span class="sw" style="background:#8592A6"></span>Contract amount</div>
           <div class="li"><span class="sw" style="background:#1F6F78"></span>Billed to date</div>
           <div class="li"><span class="sw" style="background:#C77D2E"></span>Spent to date</div>
-          ${row.total_contract_amount > 0 ? `<div class="li"><span class="sw line"></span>Contract line</div>` : ''}
           ${row.total_contract_amount > 0 && (row.billed > row.total_contract_amount || row.spent > row.total_contract_amount) ? `<div class="li"><span class="sw" style="background:#B23A48"></span>Over contract</div>` : ''}
         </div>
       </div>
