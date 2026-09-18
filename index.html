@@ -252,11 +252,12 @@
   }
   .bill-ahead-banner b{color:var(--accent);}
 
-  .chart-row{display:flex;gap:14px;margin-bottom:14px;align-items:flex-end;flex-wrap:wrap;}
-  .chart-wrap{flex:1 1 200px;min-width:180px;}
-  .chart-legend{flex:1;display:flex;gap:18px;flex-wrap:wrap;padding-bottom:6px;}
+  .chart-row{margin-bottom:14px;}
+  .chart-wrap{width:100%;}
+  .chart-legend{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;margin-top:4px;}
   .chart-legend .li{font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;}
   .chart-legend .sw{width:9px;height:9px;border-radius:2px;}
+  .chart-legend .sw.line{background:transparent;border-top:2px dashed #4C5A73;height:0;border-radius:0;}
 
   .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
   .edit-grid .full{grid-column:1/-1;}
@@ -330,7 +331,6 @@
   @media (max-width:900px){
     .stat-grid{grid-template-columns:repeat(3,1fr);}
     .edit-grid{grid-template-columns:1fr;}
-    .chart-row{flex-direction:column;}
   }
 </style>
 </head>
@@ -610,6 +610,17 @@ const ACTIONS = [
 const money = n => (n === null || n === undefined || isNaN(n))
   ? '—'
   : n.toLocaleString('en-US', {style:'currency', currency:'USD', maximumFractionDigits:0});
+
+// Short form for labels directly on the chart, where "$1,234,567" would
+// crowd a 56px-wide bar column. "$1.2M" / "$450K" / "$3,200".
+const moneyCompact = n => {
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  if(abs >= 1000000) return sign + '$' + (abs/1000000).toFixed(abs >= 10000000 ? 0 : 1) + 'M';
+  if(abs >= 1000)     return sign + '$' + Math.round(abs/1000) + 'K';
+  return sign + '$' + Math.round(abs);
+};
 
 const monthLabel = iso => {
   const d = new Date(iso + 'T00:00:00');
@@ -1061,29 +1072,49 @@ function renderTable(){
    DETAIL PANEL — selected project (right-hand side)
    ============================================================================ */
 function barChartSvg(contract, billed, spent){
-  const c = contract || 0;
-  const vals = [c, billed||0, spent||0];
+  const c = contract || 0, b = billed || 0, s = spent || 0;
+  const vals = [c, b, s];
   const max = Math.max(...vals, 1);
   const labels = ['Contract','Billed','Spent'];
-  const colors = ['#8592A6', '#1F6F78', '#C77D2E'];
-  const w = 240, h = 112, barW = 40, gap = 30, base = h - 20;
+  const baseColors = ['#8592A6', '#1F6F78', '#C77D2E'];
+  // If Billed or Spent has actually run past the contract amount, flag that
+  // specific bar in the "danger" red instead of its normal color — a color
+  // change on the bar itself reads faster than a legend lookup, and it's
+  // the exact situation this chart exists to surface.
+  const overContract = c > 0 && [false, b > c, s > c];
+  const colors = baseColors.map((col,i)=> overContract[i] ? '#B23A48' : col);
+
+  // 25% taller than the original design (112 -> 140) for readability, with
+  // extra headroom at the top reserved for a value label above each bar.
+  const w = 300, h = 140, barW = 56, gap = 36;
+  const base = h - 22;      // floor line, leaving room for the name labels below it
+  const barMaxH = base - 18; // leaves ~18px above the tallest possible bar for its value label
+  const startX = (w - (3*barW + 2*gap)) / 2;
+
   let bars = '';
   vals.forEach((v,i)=>{
-    const bh = Math.round((v/max) * (base-12));
-    const x = 18 + i*(barW+gap);
-    bars += `<rect x="${x}" y="${base-bh}" width="${barW}" height="${bh}" fill="${colors[i]}" rx="2"></rect>`;
-    bars += `<text x="${x+barW/2}" y="${base+13}" text-anchor="middle" font-size="10" fill="#4C5A73" font-family="Inter,sans-serif">${labels[i]}</text>`;
+    const bh = Math.round((v/max) * barMaxH);
+    const x = startX + i*(barW+gap);
+    const y = base - bh;
+    bars += `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" fill="${colors[i]}" rx="3"></rect>`;
+    bars += `<text x="${x+barW/2}" y="${Math.max(y-6, 11)}" text-anchor="middle" font-size="11" font-weight="600" fill="${overContract[i] ? '#B23A48' : '#2B3648'}" font-family="Inter,sans-serif">${moneyCompact(v)}</text>`;
+    bars += `<text x="${x+barW/2}" y="${base+16}" text-anchor="middle" font-size="11" fill="#4C5A73" font-family="Inter,sans-serif">${labels[i]}</text>`;
   });
+
   // Dashed reference line at the Total Contract height, drawn on top of the
-  // bars, so it's easy to see at a glance whenever Billed or Spent has run
-  // past the contract amount (mirrors the reference-line style Ajera uses
-  // on similar charts). Skipped when there's no contract amount to plot.
+  // bars with its own end label, so it's easy to see at a glance whenever
+  // Billed or Spent has run past the contract amount (mirrors the
+  // reference-line style Ajera uses on similar charts). Skipped when
+  // there's no contract amount to plot.
   let contractLine = '';
   if(c > 0){
-    const cy = base - Math.round((c/max) * (base-12));
-    contractLine = `<line x1="4" y1="${cy}" x2="${w-4}" y2="${cy}" stroke="#4C5A73" stroke-width="1.5" stroke-dasharray="4,3"></line>`;
+    const cy = base - Math.round((c/max) * barMaxH);
+    contractLine = `
+      <line x1="2" y1="${cy}" x2="${w-2}" y2="${cy}" stroke="#4C5A73" stroke-width="1.5" stroke-dasharray="4,3"></line>
+      <text x="${w-2}" y="${cy - 4}" text-anchor="end" font-size="9.5" fill="#4C5A73" font-family="Inter,sans-serif">Contract line</text>`;
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="112" preserveAspectRatio="xMidYMax meet">
+
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMax meet">
     <line x1="0" y1="${base}" x2="${w}" y2="${base}" stroke="#D7DCE3" stroke-width="1"></line>
     ${bars}
     ${contractLine}
@@ -1218,7 +1249,8 @@ function renderDetailPanel(row){
           <div class="li"><span class="sw" style="background:#8592A6"></span>Contract amount</div>
           <div class="li"><span class="sw" style="background:#1F6F78"></span>Billed to date</div>
           <div class="li"><span class="sw" style="background:#C77D2E"></span>Spent to date</div>
-          ${row.total_contract_amount > 0 ? `<div class="li"><span class="sw" style="background:transparent;border-top:2px dashed #4C5A73;height:0;"></span>Contract line</div>` : ''}
+          ${row.total_contract_amount > 0 ? `<div class="li"><span class="sw line"></span>Contract line</div>` : ''}
+          ${row.total_contract_amount > 0 && (row.billed > row.total_contract_amount || row.spent > row.total_contract_amount) ? `<div class="li"><span class="sw" style="background:#B23A48"></span>Over contract</div>` : ''}
         </div>
       </div>
 
