@@ -2,17 +2,21 @@
 -- Monthly Invoice Status — Supabase schema
 -- ============================================================================
 -- Run this once in your Supabase project's SQL Editor (Database > SQL Editor).
--- This can live in the same Supabase project you already use for other
--- tools (ykddpajaqftrcmmhizoq), or a fresh project — either works, since
--- every table name below is specific to this tool.
+-- This lives in the same Supabase project as your other tools
+-- (ykddpajaqftrcmmhizoq) — every table here is prefixed invoice_ specifically
+-- so it can't collide with another tool's tables in that shared project (the
+-- two RLS-helper functions, is_admin() and protect_project_months_columns(),
+-- aren't prefixed, since a quick project-wide check confirmed nothing else
+-- uses those names — but if you ever add a tool that also wants an
+-- is_admin() helper, prefix one of them).
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- people: one row per real account. id = the Supabase Auth user's UID.
--- You create the Auth account first (Authentication > Users > Invite user),
--- then insert the matching row here (see seed section at the bottom).
+-- invoice_people: one row per real account. id = the Supabase Auth user's
+-- UID. You create the Auth account first (Authentication > Users > Invite
+-- user), then insert the matching row here (see seed section at the bottom).
 -- ----------------------------------------------------------------------------
-create table people (
+create table invoice_people (
   id uuid primary key references auth.users(id) on delete cascade,
   canonical_name text not null,
   email text,
@@ -21,24 +25,25 @@ create table people (
 );
 
 -- ----------------------------------------------------------------------------
--- name_aliases: the free-text name strings that show up in the Ajera export
--- (Project Manager / Marketing Contact / Billing Manager columns), each
--- pointing at the person they refer to. A person can have more than one
--- alias (nicknames, a recurring typo, a maiden name, etc). This table is
--- also what the "Import errors" flagging matches against.
+-- invoice_name_aliases: the free-text name strings that show up in the
+-- Ajera export (Project Manager / Marketing Contact / Billing Manager
+-- columns), each pointing at the person they refer to. A person can have
+-- more than one alias (nicknames, a recurring typo, a maiden name, etc).
+-- This table is also what the "Import errors" flagging matches against.
 -- ----------------------------------------------------------------------------
-create table name_aliases (
+create table invoice_name_aliases (
   id bigint generated always as identity primary key,
   alias text not null unique,
-  person_id uuid not null references people(id) on delete cascade
+  person_id uuid not null references invoice_people(id) on delete cascade
 );
 
 -- ----------------------------------------------------------------------------
--- project_months: one row per project per month. This is the whole dataset —
--- both the Ajera-sourced financial columns and the PM-entered review columns
--- live on the same row, which is what makes the field-level merge possible.
+-- invoice_project_months: one row per project per month. This is the whole
+-- dataset — both the Ajera-sourced financial columns and the PM-entered
+-- review columns live on the same row, which is what makes the field-level
+-- merge possible.
 -- ----------------------------------------------------------------------------
-create table project_months (
+create table invoice_project_months (
   id bigint generated always as identity primary key,
   project_id text not null,
   month date not null,                 -- always stored as the 1st of the month
@@ -66,7 +71,7 @@ create table project_months (
   notes text,
   admin_notes text,                     -- admin-only field (the old "Eric Notes" column)
   reviewed boolean not null default false,
-  reviewed_by uuid references people(id),
+  reviewed_by uuid references invoice_people(id),
   reviewed_at timestamptz,
   bill_ahead_amount numeric,            -- PM-entered. What was billed ahead of WIP/Spent
                                          -- this month (lump-sum "bill ahead" decisions).
@@ -79,7 +84,7 @@ create table project_months (
   mc_requested_bill_amount numeric,
   mc_notes text,
   mc_reviewed boolean not null default false,
-  mc_reviewed_by uuid references people(id),
+  mc_reviewed_by uuid references invoice_people(id),
   mc_reviewed_at timestamptz,
   mc_bill_ahead_amount numeric,         -- MC-entered counterpart to bill_ahead_amount,
                                          -- for the BE side of a MEPBE Cx project.
@@ -89,13 +94,13 @@ create table project_months (
 );
 
 -- ----------------------------------------------------------------------------
--- import_runs / import_errors: a log of each monthly import and any PM/MC/BM
--- names in that import that didn't match a known alias.
+-- invoice_import_runs / invoice_import_errors: a log of each monthly import
+-- and any PM/MC/BM names in that import that didn't match a known alias.
 -- ----------------------------------------------------------------------------
-create table import_runs (
+create table invoice_import_runs (
   id bigint generated always as identity primary key,
   month date not null,
-  imported_by uuid references people(id),
+  imported_by uuid references invoice_people(id),
   imported_at timestamptz not null default now(),
   row_count int,
   new_project_count int,
@@ -103,9 +108,9 @@ create table import_runs (
   is_test boolean not null default false
 );
 
-create table import_errors (
+create table invoice_import_errors (
   id bigint generated always as identity primary key,
-  import_run_id bigint references import_runs(id) on delete cascade,
+  import_run_id bigint references invoice_import_runs(id) on delete cascade,
   project_id text,
   role text,          -- 'Project Manager' | 'Marketing Contact' | 'Billing Manager' | 'Missing Project'
   raw_name text,
@@ -117,19 +122,20 @@ create table import_errors (
 -- Row Level Security
 -- ============================================================================
 
-alter table people enable row level security;
-alter table name_aliases enable row level security;
-alter table project_months enable row level security;
-alter table import_runs enable row level security;
-alter table import_errors enable row level security;
+alter table invoice_people enable row level security;
+alter table invoice_name_aliases enable row level security;
+alter table invoice_project_months enable row level security;
+alter table invoice_import_runs enable row level security;
+alter table invoice_import_errors enable row level security;
 
 -- is_admin() exists specifically so that "is this person an admin" can be
--- checked WITHOUT that check itself being subject to the people table's own
+-- checked WITHOUT that check itself being subject to invoice_people's own
 -- row-level security policies. Writing that check as a plain subquery
--- directly inside a policy on `people` causes infinite recursion (checking
--- the policy re-triggers the policy, forever), which Postgres eventually
--- errors out on. `security definer` is what lets this function look at the
--- table's raw contents, bypassing RLS for this one narrow purpose only.
+-- directly inside a policy on `invoice_people` causes infinite recursion
+-- (checking the policy re-triggers the policy, forever), which Postgres
+-- eventually errors out on. `security definer` is what lets this function
+-- look at the table's raw contents, bypassing RLS for this one narrow
+-- purpose only.
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -137,52 +143,52 @@ security definer
 stable
 set search_path = public
 as $$
-  select coalesce((select is_admin from people where id = auth.uid()), false);
+  select coalesce((select is_admin from invoice_people where id = auth.uid()), false);
 $$;
 
 -- Everyone signed in can read the roster and aliases (needed to show names
 -- and to resolve "who can edit this row" client-side); only admins can write.
-create policy people_select on people
+create policy invoice_people_select on invoice_people
   for select using (auth.role() = 'authenticated');
-create policy people_admin_write on people
+create policy invoice_people_admin_write on invoice_people
   for all using (is_admin()) with check (is_admin());
 
-create policy aliases_select on name_aliases
+create policy invoice_aliases_select on invoice_name_aliases
   for select using (auth.role() = 'authenticated');
-create policy aliases_admin_write on name_aliases
+create policy invoice_aliases_admin_write on invoice_name_aliases
   for all using (is_admin()) with check (is_admin());
 
 -- Everyone can view every project (the "view all" requirement); the app UI
 -- defaults PMs to their own projects, but the row-level policy itself is
 -- permissive on SELECT since visibility was never meant to be restricted.
-create policy pm_select on project_months
+create policy invoice_pm_select on invoice_project_months
   for select using (auth.role() = 'authenticated');
 
 -- Only admins can add/remove project rows (that happens via the Import step).
-create policy pm_admin_insert on project_months
+create policy invoice_pm_admin_insert on invoice_project_months
   for insert with check (is_admin());
-create policy pm_admin_delete on project_months
+create policy invoice_pm_admin_delete on invoice_project_months
   for delete using (is_admin());
 
 -- Updates: allowed for admins, or for anyone whose alias matches the PM,
 -- Marketing Contact, or Billing Manager named on that specific row.
 -- (Which *columns* they're allowed to change is enforced separately below
 -- by a trigger, since Postgres RLS itself is row-level, not column-level.)
-create policy pm_update on project_months
+create policy invoice_pm_update on invoice_project_months
   for update
   using (
     is_admin()
     or exists (
-      select 1 from name_aliases na
+      select 1 from invoice_name_aliases na
       where na.person_id = auth.uid()
         and lower(na.alias) in (lower(pm_name_raw), lower(mc_name_raw), lower(bm_name_raw))
     )
   )
   with check (true);
 
-create policy runs_admin on import_runs
+create policy invoice_runs_admin on invoice_import_runs
   for all using (is_admin()) with check (is_admin());
-create policy errors_admin on import_errors
+create policy invoice_errors_admin on invoice_import_errors
   for all using (is_admin()) with check (is_admin());
 
 -- ============================================================================
@@ -241,19 +247,19 @@ begin
     -- reach this trigger at all — this is just confirming which, so the
     -- fallback branch below is mostly a defensive no-op.)
     select exists(
-      select 1 from name_aliases na
+      select 1 from invoice_name_aliases na
       where na.person_id = auth.uid()
         and lower(na.alias) = lower(OLD.pm_name_raw)
     ) into v_is_pm;
 
     select exists(
-      select 1 from name_aliases na
+      select 1 from invoice_name_aliases na
       where na.person_id = auth.uid()
         and lower(na.alias) = lower(OLD.mc_name_raw)
     ) into v_is_mc;
 
     select exists(
-      select 1 from name_aliases na
+      select 1 from invoice_name_aliases na
       where na.person_id = auth.uid()
         and lower(na.alias) = lower(OLD.bm_name_raw)
     ) into v_is_bm;
@@ -280,8 +286,8 @@ begin
 end;
 $$;
 
-create trigger project_months_protect
-  before update on project_months
+create trigger invoice_project_months_protect
+  before update on invoice_project_months
   for each row execute function protect_project_months_columns();
 
 -- ============================================================================
@@ -289,11 +295,11 @@ create trigger project_months_protect
 -- Users > Invite user, for Eric and Cathleen). Copy each person's UID from
 -- that screen and paste it in below.
 -- ============================================================================
--- insert into people (id, canonical_name, email, is_admin) values
+-- insert into invoice_people (id, canonical_name, email, is_admin) values
 --   ('<eric-auth-uid>',     'Eric Hauser',            'eric@cx-associates.com',     true),
 --   ('<cathleen-auth-uid>', 'Cathleen Branon-Keogh',  'cathleen@cx-associates.com', true);
 --
 -- Add their aliases too if the Ajera export ever spells their names
 -- differently than the canonical_name above, e.g.:
--- insert into name_aliases (alias, person_id) values
+-- insert into invoice_name_aliases (alias, person_id) values
 --   ('Eric Hauser', '<eric-auth-uid>');
