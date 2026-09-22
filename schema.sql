@@ -65,7 +65,9 @@ create table invoice_project_months (
   active boolean not null default true, -- false if this project vanished from a later import
   is_test boolean not null default false, -- true if it came from a test import (wipeable in one click)
 
-  -- PM-entered fields, preserved across re-imports.
+  -- PM-entered fields, preserved across re-imports. On a MEPBE Cx project
+  -- this is the MEP side's action; on a standard (single-discipline)
+  -- project it's the project's only action.
   requested_bill_amount numeric,
   action text,
   notes text,
@@ -81,6 +83,7 @@ create table invoice_project_months (
   -- MC-entered fields, used only for MEPBE Cx projects where the MC has an
   -- independent review responsibility. On all other project types these stay
   -- null and are ignored by the UI.
+  mc_action text,                       -- the BE side's own action, mirroring `action`
   mc_requested_bill_amount numeric,
   mc_notes text,
   mc_reviewed boolean not null default false,
@@ -277,6 +280,7 @@ begin
       NEW.mc_reviewed              := OLD.mc_reviewed;
       NEW.mc_reviewed_by           := OLD.mc_reviewed_by;
       NEW.mc_reviewed_at           := OLD.mc_reviewed_at;
+      NEW.mc_action                := OLD.mc_action;
       NEW.mc_bill_ahead_amount     := OLD.mc_bill_ahead_amount;
     end if;
   end if;
