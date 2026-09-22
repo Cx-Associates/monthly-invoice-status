@@ -945,25 +945,27 @@ function buildPayload(section){
   const payload = {};
   const mepbe = isMepbeCx(state.rows.find(r => r.id === state.selectedRowId));
   if(section === 'shared'){
-    const action = document.getElementById('f-action');
-    if(action) payload.action = action.value || null;
     if(state.isAdmin){
       const an = document.getElementById('f-admin-notes');
       if(an) payload.admin_notes = an.value || null;
     }
   }
   if(section === 'pm'){
+    const action = document.getElementById('f-action');
     const req  = document.getElementById('f-requested');
     const note = document.getElementById('f-notes');
     const ba   = document.getElementById('f-bill-ahead');
+    if(action) payload.action = action.value || null;
     if(req)  payload.requested_bill_amount = parseFloat(req.value) || null;
     if(note) payload.notes = note.value || null;
     if(ba)   payload.bill_ahead_amount = parseFloat(ba.value) || null;
   }
   if(section === 'mc'){
+    const mcAction = document.getElementById('f-mc-action');
     const mcReq  = document.getElementById('f-mc-requested');
     const mcNote = document.getElementById('f-mc-notes');
     const mcBa   = document.getElementById('f-mc-bill-ahead');
+    if(mcAction) payload.mc_action = mcAction.value || null;
     if(mcReq)  payload.mc_requested_bill_amount = parseFloat(mcReq.value) || null;
     if(mcNote) payload.mc_notes = mcNote.value || null;
     if(mcBa)   payload.mc_bill_ahead_amount = parseFloat(mcBa.value) || null;
@@ -1001,7 +1003,7 @@ function wireDirtyTracking(){
   });
   const mepbe = isMepbeCx(state.rows.find(r => r.id === state.selectedRowId));
   const fieldSections = mepbe
-    ? { 'f-action':'shared', 'f-requested':'pm', 'f-notes':'pm', 'f-bill-ahead':'pm', 'f-mc-requested':'mc', 'f-mc-notes':'mc', 'f-mc-bill-ahead':'mc', 'f-admin-notes':'shared' }
+    ? { 'f-action':'pm', 'f-requested':'pm', 'f-notes':'pm', 'f-bill-ahead':'pm', 'f-mc-action':'mc', 'f-mc-requested':'mc', 'f-mc-notes':'mc', 'f-mc-bill-ahead':'mc', 'f-admin-notes':'shared' }
     : { 'f-action':'standard', 'f-requested':'standard', 'f-notes':'standard', 'f-bill-ahead':'standard', 'f-admin-notes':'standard' };
   Object.entries(fieldSections).forEach(([id, section])=>{
     const el = document.getElementById(id);
@@ -1143,11 +1145,18 @@ function reviewedClass(row){
 }
 
 // Renders the PM review section (always shown).
-function pmReviewHtml(row, editable){
+function pmReviewHtml(row, editable, effectiveAction){
   return `
     <div class="review-section" id="pm-section">
       <div class="review-section-head">MEP review</div>
       <div class="edit-grid">
+        <div class="field full">
+          <label for="f-action">Action <span class="required-tag">required to mark reviewed</span></label>
+          <select id="f-action" ${editable ? '' : 'disabled'}>
+            <option value="">— choose —</option>
+            ${ACTIONS.map(a => `<option value="${a}" ${effectiveAction===a?'selected':''}>${a}</option>`).join('')}
+          </select>
+        </div>
         <div class="field">
           <label for="f-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
           <input type="number" step="0.01" id="f-requested" autocomplete="off" value="${row.requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
@@ -1172,11 +1181,18 @@ function pmReviewHtml(row, editable){
 }
 
 // Renders the MC review section (only for MEPBE Cx projects).
-function mcReviewHtml(row, editable){
+function mcReviewHtml(row, editable, effectiveMcAction){
   return `
     <div class="review-section" id="mc-section" style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
       <div class="review-section-head">BE review</div>
       <div class="edit-grid">
+        <div class="field full">
+          <label for="f-mc-action">Action <span class="required-tag">required to mark reviewed</span></label>
+          <select id="f-mc-action" ${editable ? '' : 'disabled'}>
+            <option value="">— choose —</option>
+            ${ACTIONS.map(a => `<option value="${a}" ${effectiveMcAction===a?'selected':''}>${a}</option>`).join('')}
+          </select>
+        </div>
         <div class="field">
           <label for="f-mc-requested">Requested bill amount <span class="optional-tag">(optional)</span></label>
           <input type="number" step="0.01" id="f-mc-requested" autocomplete="off" value="${row.mc_requested_bill_amount ?? ''}" ${editable ? '' : 'disabled'}>
@@ -1222,6 +1238,8 @@ function renderDetailPanel(row){
   const LOW_WIP_ACTION = '< 500 - BILL WITH GOOD REASON';
   const effectiveAction = row.action
     || (row.wip != null && !isNaN(row.wip) && row.wip < 500 ? LOW_WIP_ACTION : '');
+  const effectiveMcAction = row.mc_action
+    || (row.wip != null && !isNaN(row.wip) && row.wip < 500 ? LOW_WIP_ACTION : '');
 
   el.innerHTML = `
     ${row.is_test ? `<div class="test-banner"><span><b>Test data.</b> This project row came from a test import and is not real billing data.</span></div>` : ''}
@@ -1253,7 +1271,8 @@ function renderDetailPanel(row){
         </div>
       </div>
 
-      <!-- Shared fields: Action and Admin Notes -->
+      ${mepbe ? '' : `
+      <!-- Shared field: Action -->
       <fieldset ${editable ? '' : 'class="locked" disabled'} style="border:none;padding:0;margin:0 0 16px;">
         <div class="edit-grid">
           <div class="field full">
@@ -1264,10 +1283,10 @@ function renderDetailPanel(row){
             </select>
           </div>
         </div>
-      </fieldset>
+      </fieldset>`}
 
       ${mepbe
-        ? pmReviewHtml(row, editable) + mcReviewHtml(row, editable)
+        ? pmReviewHtml(row, editable, effectiveAction) + mcReviewHtml(row, editable, effectiveMcAction)
         : `
         <!-- Standard single review section -->
         <fieldset id="edit-fields" ${editable ? '' : 'class="locked" disabled'} style="border:none;padding:0;margin:0;">
@@ -1326,7 +1345,8 @@ function renderDetailPanel(row){
     if(mepbe){
       document.getElementById('pm-reviewed-btn')?.addEventListener('click', ()=> savePmFields(row, !row.reviewed));
       document.getElementById('mc-reviewed-btn')?.addEventListener('click', ()=> saveMcFields(row, !row.mc_reviewed));
-      document.getElementById('f-action')?.addEventListener('change', ()=>{ refreshReviewedAffordance('pm'); refreshReviewedAffordance('mc'); });
+      document.getElementById('f-action')?.addEventListener('change', ()=> refreshReviewedAffordance('pm'));
+      document.getElementById('f-mc-action')?.addEventListener('change', ()=> refreshReviewedAffordance('mc'));
       refreshReviewedAffordance('pm');
       refreshReviewedAffordance('mc');
     } else {
@@ -1381,7 +1401,7 @@ async function loadBillAheadHistory(row){
 }
 
 function refreshReviewedAffordance(which){
-  const actionEl = document.getElementById('f-action');
+  const actionEl = document.getElementById(which === 'mc' ? 'f-mc-action' : 'f-action');
   const hasAction = !!(actionEl && actionEl.value);
 
   if(which === 'standard'){
@@ -1412,7 +1432,7 @@ function refreshReviewedAffordance(which){
       note.classList.remove('blocked');
     } else {
       btn.disabled = !hasAction;
-      note.textContent = hasAction ? 'Saves MEP entries and marks MEP reviewed.' : 'Choose a Project manager action above first.';
+      note.textContent = hasAction ? 'Saves MEP entries and marks MEP reviewed.' : 'Choose an action above first.';
       note.classList.toggle('blocked', !hasAction);
     }
     return;
@@ -1429,7 +1449,7 @@ function refreshReviewedAffordance(which){
       note.classList.remove('blocked');
     } else {
       btn.disabled = !hasAction;
-      note.textContent = hasAction ? 'Saves BE entries and marks BE reviewed.' : 'Choose a Project manager action above first.';
+      note.textContent = hasAction ? 'Saves BE entries and marks BE reviewed.' : 'Choose an action above first.';
       note.classList.toggle('blocked', !hasAction);
     }
   }
@@ -1450,14 +1470,15 @@ async function saveShared(row){
   renderDetailPanel(state.rows.find(r => r.id === row.id));
 }
 
-// Save PM-side fields: Requested Bill Amount, Notes, and optionally Reviewed.
+// Save PM-side fields: Action, Requested Bill Amount, Notes, and optionally Reviewed.
 async function savePmFields(row, setReviewed){
   const action = document.getElementById('f-action').value || null;
   if(setReviewed === true && !action){
-    toast('Choose a Project manager action before marking MEP reviewed', true);
+    toast('Choose an action before marking MEP reviewed', true);
     return;
   }
   const payload = {
+    action,
     requested_bill_amount: parseFloat(document.getElementById('f-requested')?.value) || null,
     notes: document.getElementById('f-notes')?.value || null,
   };
@@ -1473,14 +1494,15 @@ async function savePmFields(row, setReviewed){
   renderDetailPanel(state.rows.find(r => r.id === row.id));
 }
 
-// Save MC-side fields: MC Requested Bill Amount, MC Notes, and optionally MC Reviewed.
+// Save MC-side fields: Action, MC Requested Bill Amount, MC Notes, and optionally MC Reviewed.
 async function saveMcFields(row, setReviewed){
-  const action = document.getElementById('f-action').value || null;
-  if(setReviewed === true && !action){
-    toast('Choose a Project manager action before marking BE reviewed', true);
+  const mcAction = document.getElementById('f-mc-action').value || null;
+  if(setReviewed === true && !mcAction){
+    toast('Choose an action before marking BE reviewed', true);
     return;
   }
   const payload = {
+    mc_action: mcAction,
     mc_requested_bill_amount: parseFloat(document.getElementById('f-mc-requested')?.value) || null,
     mc_notes: document.getElementById('f-mc-notes')?.value || null,
   };
