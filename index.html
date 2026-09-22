@@ -1862,10 +1862,13 @@ async function renderPeopleAdmin(){
   errorsList.querySelectorAll('.map-select').forEach(sel=>{
     sel.addEventListener('change', async ()=>{
       if(!sel.value) return;
-      const errorId = sel.dataset.error;
       const raw = sel.dataset.name;
       await sb.from('invoice_name_aliases').insert({ alias: raw, person_id: sel.value });
-      await sb.from('invoice_import_errors').update({ resolved: true }).eq('id', errorId);
+      // Resolve every unresolved row with this exact name, not just the one
+      // clicked — one name can show up unresolved on several different
+      // projects (each is its own row), and mapping it once should clear
+      // all of them, since the new alias fixes the name everywhere at once.
+      await sb.from('invoice_import_errors').update({ resolved: true }).eq('raw_name', raw).eq('resolved', false);
       toast('Mapped ' + raw);
       await renderPeopleAdmin();
     });
