@@ -270,6 +270,8 @@
     position:sticky;top:0;cursor:pointer;white-space:nowrap;
   }
   table.data-table thead th:hover{color:var(--ink);}
+  .sort-arrow{display:inline-block;margin-left:5px;font-size:8px;line-height:1;color:var(--line);}
+  .sort-arrow.active{color:var(--ink);}
   table.data-table tbody td{padding:7px 11px;border-bottom:1px solid var(--line-soft);}
   table.data-table tbody tr{cursor:pointer;}
   table.data-table tbody tr:hover{background:var(--accent-soft);}
@@ -437,11 +439,11 @@
             <table class="data-table" id="project-table">
               <thead>
                 <tr>
-                  <th data-sort="project_id">Project</th>
-                  <th data-sort="description">Description</th>
-                  <th data-sort="pm_name_raw">PM</th>
-                  <th data-sort="wip" class="num">WIP</th>
-                  <th data-sort="reviewed">Reviewed</th>
+                  <th data-sort="project_id">Project<span class="sort-arrow"></span></th>
+                  <th data-sort="description">Description<span class="sort-arrow"></span></th>
+                  <th data-sort="pm_name_raw">PM<span class="sort-arrow"></span></th>
+                  <th data-sort="wip" class="num">WIP<span class="sort-arrow"></span></th>
+                  <th data-sort="reviewed">Reviewed<span class="sort-arrow"></span></th>
                 </tr>
               </thead>
               <tbody id="project-table-body"></tbody>
@@ -858,8 +860,24 @@ function wireTableSort(){
     th.addEventListener('click', ()=>{
       const key = th.dataset.sort;
       if(state.sortKey === key) state.sortDir *= -1; else { state.sortKey = key; state.sortDir = 1; }
+      updateSortArrows();
       renderTable();
     });
+  });
+  updateSortArrows(); // show the initial (default) sort column on first load
+}
+
+// Every header gets a small triangle: dark and pointing the active
+// direction on whichever column the list is currently sorted by, faint
+// (and just a neutral down-arrow) on every other column, so it's clear at
+// a glance both which column is driving the sort and which way.
+function updateSortArrows(){
+  document.querySelectorAll('#project-table thead th[data-sort]').forEach(th=>{
+    const arrow = th.querySelector('.sort-arrow');
+    if(!arrow) return;
+    const isActive = th.dataset.sort === state.sortKey;
+    arrow.classList.toggle('active', isActive);
+    arrow.textContent = isActive ? (state.sortDir === 1 ? '▲' : '▼') : '▼';
   });
 }
 
@@ -894,6 +912,19 @@ function visibleRows(){
       (r.client||'').toLowerCase().includes(s));
   }
   rows.sort((a,b)=>{
+    // The Reviewed column shows a combined status (Not Reviewed / MEP
+    // Reviewed / BE Reviewed / Review(s) Complete), not the raw `reviewed`
+    // boolean — sorting on the raw column put partially-reviewed MEPBE Cx
+    // rows (reviewed=true, mc_reviewed=false) in with the fully-reviewed
+    // ones, since it never looked at mc_reviewed at all. Sort by the same
+    // rank the badge itself uses instead: not reviewed, then partial, then
+    // complete.
+    if(state.sortKey === 'reviewed'){
+      const rank = { no: 0, partial: 1, yes: 2 };
+      const av = rank[reviewedClass(a)], bv = rank[reviewedClass(b)];
+      if(av === bv) return 0;
+      return (av > bv ? 1 : -1) * state.sortDir;
+    }
     let av = a[state.sortKey], bv = b[state.sortKey];
     if(typeof av === 'string') av = (av||'').toLowerCase();
     if(typeof bv === 'string') bv = (bv||'').toLowerCase();
