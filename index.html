@@ -186,6 +186,32 @@
   .stat-tile.negative .val{color:var(--danger);}
   .stat-tile.wip .val{color:var(--accent);}
 
+  /* Last Client Invoice: sits directly above the figures, deliberately loud. */
+  .lci-strip{
+    display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    background:var(--accent-soft);border:1px solid var(--accent);border-bottom:none;
+    border-radius:4px 4px 0 0;padding:8px 12px;margin-top:2px;
+  }
+  .lci-strip + .stat-grid{border-radius:0 0 4px 4px;}
+  .lci-strip .lbl{font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.04em;}
+  .lci-strip .val{font-family:var(--font-mono);font-size:17px;font-weight:600;color:var(--ink);}
+  .lci-strip .val.none{color:var(--ink-faint);font-weight:400;font-size:14px;}
+
+  /* ---------- Comment log ---------- */
+  .comment-list{
+    border:1px solid var(--line);border-radius:4px;background:#fff;
+    max-height:220px;overflow-y:auto;padding:0;margin-bottom:8px;
+  }
+  .comment-item{padding:8px 11px;border-bottom:1px solid var(--line-soft);}
+  .comment-item:last-child{border-bottom:none;}
+  .comment-meta{font-size:11.5px;color:var(--ink-faint);margin-bottom:2px;}
+  .comment-meta b{color:var(--ink);font-weight:600;margin-right:6px;}
+  .comment-body{font-size:13.5px;white-space:pre-wrap;word-break:break-word;}
+  .comment-empty{padding:9px 11px;font-size:12.5px;color:var(--ink-faint);}
+  .comment-add{display:flex;flex-direction:column;gap:6px;align-items:flex-start;}
+  .comment-add textarea{width:100%;min-height:52px;}
+  .comment-hint{font-size:11.5px;color:var(--ink-faint);}
+
   /* ---------- Reviewed action: deliberately the most prominent control ---------- */
   .review-action-bar{
     margin-top:16px;padding-top:16px;border-top:1px solid var(--line);
@@ -277,6 +303,7 @@
   table.data-table tbody tr:hover{background:var(--accent-soft);}
   table.data-table tbody tr.selected{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent);}
   table.data-table .num{font-family:var(--font-mono);text-align:right;white-space:nowrap;}
+  table.data-table .action-cell{font-size:11.5px;white-space:nowrap;line-height:1.35;}
   table.data-table .desc-cell{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;}
   .status-dot.yes{background:var(--good);}
@@ -443,6 +470,7 @@
                   <th data-sort="description">Description<span class="sort-arrow"></span></th>
                   <th data-sort="pm_name_raw">PM<span class="sort-arrow"></span></th>
                   <th data-sort="wip" class="num">WIP<span class="sort-arrow"></span></th>
+                  <th data-sort="action_list">Action<span class="sort-arrow"></span></th>
                   <th data-sort="reviewed">Reviewed<span class="sort-arrow"></span></th>
                 </tr>
               </thead>
@@ -600,13 +628,32 @@ let state = {
   peopleDirectory: [],     // all `people` rows
   aliasDirectory: [],      // all `name_aliases` rows
   unresolvedErrors: [],
+  comments: { rowId: null, standard: [], mep: [], be: [] },  // append-only comment log for the open project-month
   wired: false,       // guards against double-attaching static event listeners across multiple boot() calls
 };
 
 const ACTIONS = [
   'BILL WIP','HOLD','BILL AND CLOSE','BILL CUSTOM',
-  'T&M CUSTOM (SEE NOTE)','OVER BUDGET - DO NOT BILL','< 500 - BILL WITH GOOD REASON'
+  'T&M CUSTOM (SEE NOTE)','OVER BUDGET - DO NOT BILL','< 500 - BILL WITH GOOD REASON',
+  'SEE NOTES'
 ];
+const SEE_NOTES = 'SEE NOTES';
+
+// Short labels for the left-hand list only; the detail panel keeps full text.
+const ACTION_SHORT = {
+  'BILL WIP':'BILL WIP','HOLD':'HOLD','BILL AND CLOSE':'BILL + CLOSE','BILL CUSTOM':'BILL CUSTOM',
+  'T&M CUSTOM (SEE NOTE)':'T&M CUSTOM','OVER BUDGET - DO NOT BILL':'OVER BUDGET',
+  '< 500 - BILL WITH GOOD REASON':'< 500','SEE NOTES':'SEE NOTES'
+};
+const shortAction = a => a ? (ACTION_SHORT[a] || a) : '—';
+// Saved actions only (the "< 500" default in the panel is a suggestion, not a saved value).
+function actionListLines(r){
+  return isMepbeCx(r)
+    ? [`MEP: ${shortAction(r.action)}`, `BE: ${shortAction(r.mc_action)}`]
+    : [shortAction(r.action)];
+}
+
+const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 const money = n => (n === null || n === undefined || isNaN(n))
   ? '—'
@@ -925,7 +972,8 @@ function visibleRows(){
       if(av === bv) return 0;
       return (av > bv ? 1 : -1) * state.sortDir;
     }
-    let av = a[state.sortKey], bv = b[state.sortKey];
+    let av = state.sortKey === 'action_list' ? actionListLines(a).join(' ') : a[state.sortKey];
+    let bv = state.sortKey === 'action_list' ? actionListLines(b).join(' ') : b[state.sortKey];
     if(typeof av === 'string') av = (av||'').toLowerCase();
     if(typeof bv === 'string') bv = (bv||'').toLowerCase();
     if(av === bv) return 0;
@@ -984,31 +1032,25 @@ function buildPayload(section){
   if(section === 'pm'){
     const action = document.getElementById('f-action');
     const req  = document.getElementById('f-requested');
-    const note = document.getElementById('f-notes');
     const ba   = document.getElementById('f-bill-ahead');
     if(action) payload.action = action.value || null;
     if(req)  payload.requested_bill_amount = parseFloat(req.value) || null;
-    if(note) payload.notes = note.value || null;
     if(ba)   payload.bill_ahead_amount = parseFloat(ba.value) || null;
   }
   if(section === 'mc'){
     const mcAction = document.getElementById('f-mc-action');
     const mcReq  = document.getElementById('f-mc-requested');
-    const mcNote = document.getElementById('f-mc-notes');
     const mcBa   = document.getElementById('f-mc-bill-ahead');
     if(mcAction) payload.mc_action = mcAction.value || null;
     if(mcReq)  payload.mc_requested_bill_amount = parseFloat(mcReq.value) || null;
-    if(mcNote) payload.mc_notes = mcNote.value || null;
     if(mcBa)   payload.mc_bill_ahead_amount = parseFloat(mcBa.value) || null;
   }
   if(section === 'standard'){
     const action = document.getElementById('f-action');
     const req    = document.getElementById('f-requested');
-    const note   = document.getElementById('f-notes');
     const ba     = document.getElementById('f-bill-ahead');
     if(action) payload.action = action.value || null;
     if(req)    payload.requested_bill_amount = parseFloat(req.value) || null;
-    if(note)   payload.notes = note.value || null;
     if(ba)     payload.bill_ahead_amount = parseFloat(ba.value) || null;
     if(state.isAdmin){
       const an = document.getElementById('f-admin-notes');
@@ -1034,8 +1076,8 @@ function wireDirtyTracking(){
   });
   const mepbe = isMepbeCx(state.rows.find(r => r.id === state.selectedRowId));
   const fieldSections = mepbe
-    ? { 'f-action':'pm', 'f-requested':'pm', 'f-notes':'pm', 'f-bill-ahead':'pm', 'f-mc-action':'mc', 'f-mc-requested':'mc', 'f-mc-notes':'mc', 'f-mc-bill-ahead':'mc', 'f-admin-notes':'shared' }
-    : { 'f-action':'standard', 'f-requested':'standard', 'f-notes':'standard', 'f-bill-ahead':'standard', 'f-admin-notes':'standard' };
+    ? { 'f-action':'pm', 'f-requested':'pm', 'f-bill-ahead':'pm', 'f-mc-action':'mc', 'f-mc-requested':'mc', 'f-mc-bill-ahead':'mc', 'f-admin-notes':'shared' }
+    : { 'f-action':'standard', 'f-requested':'standard', 'f-bill-ahead':'standard', 'f-admin-notes':'standard' };
   Object.entries(fieldSections).forEach(([id, section])=>{
     const el = document.getElementById(id);
     if(!el) return;
@@ -1045,6 +1087,14 @@ function wireDirtyTracking(){
 }
 
 async function confirmSwitchRow(){
+  // An unposted comment would be lost on switching; offer to post it.
+  for(const t of ['standard','mep','be']){
+    const ta = document.getElementById('cn-' + t);
+    if(ta && ta.value.trim()){
+      if(!confirm("You typed a comment that hasn't been added yet.\n\nOK adds it now and continues.\nCancel stays on this project so you can edit or clear it.")) return false;
+      if(!(await postComment(t))) return false;
+    }
+  }
   const anyDirty  = Object.values(state.dirty).some(Boolean);
   const anyFailed = Object.values(autoSaveFailed).some(Boolean);
   if(!anyDirty && !anyFailed) return true;
@@ -1062,7 +1112,7 @@ function renderTable(){
   const rows = visibleRows();
   const body = document.getElementById('project-table-body');
   if(!rows.length){
-    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">No projects match the current filters.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state">No projects match the current filters.</div></td></tr>`;
     return;
   }
   body.innerHTML = rows.map(r => `
@@ -1071,6 +1121,7 @@ function renderTable(){
       <td class="desc-cell" title="${(r.description||'').replace(/"/g,'&quot;')}">${r.description || ''}</td>
       <td>${r.pm_name_raw || ''}</td>
       <td class="num">${money(r.wip)}</td>
+      <td class="action-cell">${actionListLines(r).map(esc).join('<br>')}</td>
       <td><span class="status-dot ${reviewedClass(r)}"></span>${reviewedLabel(r)}</td>
     </tr>
   `).join('');
@@ -1175,6 +1226,102 @@ function reviewedClass(row){
   return 'no';
 }
 
+/* ---------- Comment log ----------
+   Threads: 'standard' (single-review projects), 'mep' (PM side of MEPBE Cx),
+   'be' (MC side). Comments are stored per project-month row, are stamped with
+   author and time by the database, and can't be edited or deleted. */
+const THREAD_OF = { standard:'standard', pm:'mep', mc:'be' };
+
+function commentThreadHtml(thread, editable){
+  return `
+    <label>Comments</label>
+    <div class="comment-list" id="cl-${thread}"><div class="comment-empty">Loading…</div></div>
+    ${editable ? `
+    <div class="comment-add">
+      <textarea id="cn-${thread}" autocomplete="off" placeholder="Write a comment…"></textarea>
+      <button type="button" class="btn secondary" id="cb-${thread}">Add comment</button>
+      <div class="comment-hint">Comments are stamped with your name and the time, and can't be edited or deleted. They belong to this month only.</div>
+    </div>` : ''}`;
+}
+
+function fmtCommentTime(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) + ', ' +
+         d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+}
+
+function renderThread(thread){
+  const el = document.getElementById('cl-' + thread);
+  if(!el) return;
+  const list = state.comments[thread] || [];
+  if(!list.length){ el.innerHTML = '<div class="comment-empty">No comments yet.</div>'; return; }
+  el.innerHTML = list.map(c => `
+    <div class="comment-item">
+      <div class="comment-meta"><b>${esc(c.author_name)}</b>${esc(fmtCommentTime(c.created_at))}</div>
+      <div class="comment-body">${esc(c.body)}</div>
+    </div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function loadComments(rowId){
+  // Show anything already cached for this same row right away, then refresh.
+  if(state.comments.rowId !== rowId) state.comments = { rowId, standard: [], mep: [], be: [] };
+  ['standard','mep','be'].forEach(renderThread);
+  const { data, error } = await sb.from('invoice_notes_log')
+    .select('id, thread, author_name, body, created_at')
+    .eq('project_month_id', rowId)
+    .order('created_at', {ascending:true}).order('id', {ascending:true});
+  if(state.selectedRowId !== rowId) return;          // person already moved on
+  if(error){
+    ['standard','mep','be'].forEach(t => {
+      const el = document.getElementById('cl-' + t);
+      if(el) el.innerHTML = '<div class="comment-empty">Comments could not be loaded: ' + esc(error.message) + '</div>';
+    });
+    return;
+  }
+  state.comments = { rowId, standard: [], mep: [], be: [] };
+  (data||[]).forEach(c => { if(state.comments[c.thread]) state.comments[c.thread].push(c); });
+  ['standard','mep','be'].forEach(renderThread);
+  ['standard','pm','mc'].forEach(w => { if(document.getElementById(w === 'standard' ? 'reviewed-btn' : w + '-reviewed-btn')) refreshReviewedAffordance(w); });
+}
+
+async function postComment(thread){
+  const ta = document.getElementById('cn-' + thread);
+  const body = ta ? ta.value.trim() : '';
+  if(!body) return true;
+  const rowId = state.selectedRowId;
+  const btn = document.getElementById('cb-' + thread);
+  if(btn) btn.disabled = true;
+  const { data, error } = await sb.from('invoice_notes_log')
+    .insert({ project_month_id: rowId, thread, body })
+    .select('id, thread, author_name, body, created_at').single();
+  if(btn) btn.disabled = false;
+  if(error){ toast('Comment not added: ' + error.message, true); return false; }
+  if(state.comments.rowId === rowId) state.comments[thread].push(data);
+  if(ta) ta.value = '';
+  renderThread(thread);
+  ['standard','pm','mc'].forEach(w => { if(THREAD_OF[w] === thread) refreshReviewedAffordance(w); });
+  return true;
+}
+
+// True when this side has at least one posted comment or text waiting in the box.
+function threadHasComment(thread){
+  const ta = document.getElementById('cn-' + thread);
+  return (state.comments[thread] || []).length > 0 || !!(ta && ta.value.trim());
+}
+
+// Before any explicit save: post waiting comment text, and enforce that
+// SEE NOTES has at least one comment when marking reviewed.
+async function commentGate(which, action, setReviewed){
+  const thread = THREAD_OF[which];
+  if(!(await postComment(thread))) return false;
+  if(setReviewed === true && action === SEE_NOTES && !(state.comments[thread] || []).length){
+    toast('SEE NOTES needs at least one comment explaining what to see', true);
+    return false;
+  }
+  return true;
+}
+
 // Renders the PM review section (always shown).
 function pmReviewHtml(row, editable, effectiveAction){
   return `
@@ -1196,10 +1343,7 @@ function pmReviewHtml(row, editable, effectiveAction){
           <label for="f-bill-ahead">Bill ahead this month <span class="optional-tag">(optional)</span></label>
           <input type="number" step="0.01" id="f-bill-ahead" autocomplete="off" value="${row.bill_ahead_amount ?? ''}" ${editable ? '' : 'disabled'}>
         </div>
-        <div class="field full">
-          <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
-          <textarea id="f-notes" autocomplete="off" ${editable ? '' : 'disabled'}>${row.notes || ''}</textarea>
-        </div>
+        <div class="field full">${commentThreadHtml('mep', editable)}</div>
       </div>
       ${editable ? `
       <div class="review-action-bar">
@@ -1232,10 +1376,7 @@ function mcReviewHtml(row, editable, effectiveMcAction){
           <label for="f-mc-bill-ahead">Bill ahead this month <span class="optional-tag">(optional)</span></label>
           <input type="number" step="0.01" id="f-mc-bill-ahead" autocomplete="off" value="${row.mc_bill_ahead_amount ?? ''}" ${editable ? '' : 'disabled'}>
         </div>
-        <div class="field full">
-          <label for="f-mc-notes">Notes <span class="optional-tag">(optional)</span></label>
-          <textarea id="f-mc-notes" autocomplete="off" ${editable ? '' : 'disabled'}>${row.mc_notes || ''}</textarea>
-        </div>
+        <div class="field full">${commentThreadHtml('be', editable)}</div>
       </div>
       ${editable ? `
       <div class="review-action-bar">
@@ -1284,6 +1425,7 @@ function renderDetailPanel(row){
         <span class="reviewed-pill ${revClass}">${revLabel}</span>
       </div>
 
+      <div class="lci-strip"><span class="lbl">Last client invoice</span><span class="val ${row.last_client_invoice ? '' : 'none'}">${row.last_client_invoice ? esc(row.last_client_invoice) : 'Not available'}</span></div>
       <div class="stat-grid">
         <div class="stat-tile"><div class="lbl">Total contract</div><div class="val">${money(row.total_contract_amount)}</div></div>
         <div class="stat-tile"><div class="lbl">Billed</div><div class="val">${money(row.billed)}</div></div>
@@ -1330,12 +1472,9 @@ function renderDetailPanel(row){
               <label for="f-bill-ahead">Bill ahead this month <span class="optional-tag">(optional)</span></label>
               <input type="number" step="0.01" id="f-bill-ahead" autocomplete="off" value="${row.bill_ahead_amount ?? ''}">
             </div>
-            <div class="field full">
-              <label for="f-notes">Notes <span class="optional-tag">(optional)</span></label>
-              <textarea id="f-notes" autocomplete="off">${row.notes || ''}</textarea>
-            </div>
           </div>
         </fieldset>
+        <div class="edit-grid" style="margin-top:12px;"><div class="field full">${commentThreadHtml('standard', editable)}</div></div>
         ${!editable
           ? '<div class="locked-note">You can view this project, but only its PM, MC, BM, or an admin can edit it.</div>'
           : `
@@ -1371,8 +1510,17 @@ function renderDetailPanel(row){
   `;
 
   loadBillAheadHistory(row);
+  loadComments(row.id);
 
   if(editable){
+    const threadsHere = mepbe ? ['mep','be'] : ['standard'];
+    threadsHere.forEach(t => {
+      document.getElementById('cb-' + t)?.addEventListener('click', ()=> postComment(t));
+      document.getElementById('cn-' + t)?.addEventListener('input', ()=>{
+        const w = t === 'mep' ? 'pm' : t === 'be' ? 'mc' : 'standard';
+        refreshReviewedAffordance(w);
+      });
+    });
     if(mepbe){
       document.getElementById('pm-reviewed-btn')?.addEventListener('click', ()=> savePmFields(row, !row.reviewed));
       document.getElementById('mc-reviewed-btn')?.addEventListener('click', ()=> saveMcFields(row, !row.mc_reviewed));
@@ -1434,6 +1582,9 @@ async function loadBillAheadHistory(row){
 function refreshReviewedAffordance(which){
   const actionEl = document.getElementById(which === 'mc' ? 'f-mc-action' : 'f-action');
   const hasAction = !!(actionEl && actionEl.value);
+  const needsComment = hasAction && actionEl.value === SEE_NOTES && !threadHasComment(THREAD_OF[which]);
+  const canReview = hasAction && !needsComment;
+  const seeNotesMsg = 'SEE NOTES needs at least one comment. Add one above first.';
 
   if(which === 'standard'){
     const btn = document.getElementById('reviewed-btn');
@@ -1445,9 +1596,9 @@ function refreshReviewedAffordance(which){
       note.textContent = 'Saved as reviewed. Click above to reopen it for changes.';
       note.classList.remove('blocked');
     } else {
-      btn.disabled = !hasAction;
-      note.textContent = hasAction ? 'This saves your entries and marks the project reviewed.' : 'Choose a Project manager action above before marking this reviewed.';
-      note.classList.toggle('blocked', !hasAction);
+      btn.disabled = !canReview;
+      note.textContent = needsComment ? seeNotesMsg : hasAction ? 'This saves your entries and marks the project reviewed.' : 'Choose a Project manager action above before marking this reviewed.';
+      note.classList.toggle('blocked', !canReview);
     }
     return;
   }
@@ -1462,9 +1613,9 @@ function refreshReviewedAffordance(which){
       note.textContent = 'MEP review saved. Click above to reopen.';
       note.classList.remove('blocked');
     } else {
-      btn.disabled = !hasAction;
-      note.textContent = hasAction ? 'Saves MEP entries and marks MEP reviewed.' : 'Choose an action above first.';
-      note.classList.toggle('blocked', !hasAction);
+      btn.disabled = !canReview;
+      note.textContent = needsComment ? seeNotesMsg : hasAction ? 'Saves MEP entries and marks MEP reviewed.' : 'Choose an action above first.';
+      note.classList.toggle('blocked', !canReview);
     }
     return;
   }
@@ -1479,9 +1630,9 @@ function refreshReviewedAffordance(which){
       note.textContent = 'BE review saved. Click above to reopen.';
       note.classList.remove('blocked');
     } else {
-      btn.disabled = !hasAction;
-      note.textContent = hasAction ? 'Saves BE entries and marks BE reviewed.' : 'Choose an action above first.';
-      note.classList.toggle('blocked', !hasAction);
+      btn.disabled = !canReview;
+      note.textContent = needsComment ? seeNotesMsg : hasAction ? 'Saves BE entries and marks BE reviewed.' : 'Choose an action above first.';
+      note.classList.toggle('blocked', !canReview);
     }
   }
 }
@@ -1501,17 +1652,17 @@ async function saveShared(row){
   renderDetailPanel(state.rows.find(r => r.id === row.id));
 }
 
-// Save PM-side fields: Action, Requested Bill Amount, Notes, and optionally Reviewed.
+// Save PM-side fields: Action, Requested Bill Amount, and optionally Reviewed.
 async function savePmFields(row, setReviewed){
   const action = document.getElementById('f-action').value || null;
   if(setReviewed === true && !action){
     toast('Choose an action before marking MEP reviewed', true);
     return;
   }
+  if(!(await commentGate('pm', action, setReviewed))) return;
   const payload = {
     action,
     requested_bill_amount: parseFloat(document.getElementById('f-requested')?.value) || null,
-    notes: document.getElementById('f-notes')?.value || null,
   };
   if(setReviewed === true){
     payload.reviewed = true; payload.reviewed_by = state.person.id; payload.reviewed_at = new Date().toISOString();
@@ -1525,17 +1676,17 @@ async function savePmFields(row, setReviewed){
   renderDetailPanel(state.rows.find(r => r.id === row.id));
 }
 
-// Save MC-side fields: Action, MC Requested Bill Amount, MC Notes, and optionally MC Reviewed.
+// Save MC-side fields: Action, MC Requested Bill Amount, and optionally MC Reviewed.
 async function saveMcFields(row, setReviewed){
   const mcAction = document.getElementById('f-mc-action').value || null;
   if(setReviewed === true && !mcAction){
     toast('Choose an action before marking BE reviewed', true);
     return;
   }
+  if(!(await commentGate('mc', mcAction, setReviewed))) return;
   const payload = {
     mc_action: mcAction,
     mc_requested_bill_amount: parseFloat(document.getElementById('f-mc-requested')?.value) || null,
-    mc_notes: document.getElementById('f-mc-notes')?.value || null,
   };
   if(setReviewed === true){
     payload.mc_reviewed = true; payload.mc_reviewed_by = state.person.id; payload.mc_reviewed_at = new Date().toISOString();
@@ -1556,10 +1707,10 @@ async function saveRow(row, {setReviewed} = {setReviewed:null}){
     toast('Choose a Project manager action before marking this reviewed', true);
     return;
   }
+  if(!(await commentGate('standard', action, setReviewed))) return;
   const payload = {
     requested_bill_amount: parseFloat(document.getElementById('f-requested')?.value) || null,
     action,
-    notes: document.getElementById('f-notes')?.value || null,
   };
   if(setReviewed === true){
     payload.reviewed = true; payload.reviewed_by = state.person.id; payload.reviewed_at = new Date().toISOString();
@@ -1606,6 +1757,7 @@ const EXPECTED_HEADERS = {
   'Billed':'billed',
   'Spent':'spent',
   'WIP':'wip',
+  'Last Client Invoice':'last_client_invoice',   // text; may be a number or a label
   // Spend Remaining and Bill Remaining are deliberately NOT read from the
   // file. Both are confirmed to be plain subtraction in Ajera (Contract
   // minus Spent, Contract minus Billed), so they're computed below instead
@@ -1670,7 +1822,9 @@ document.getElementById('import-file').addEventListener('change', async e=>{
     Object.entries(colIndex).forEach(([field, idx])=>{
       if(field === 'project_id') return;
       let v = r[idx];
-      if(typeof v === 'number' && NUMERIC_FIELDS.includes(field)){
+      if(field === 'last_client_invoice'){
+        v = (v === null || v === undefined || String(v).trim() === '') ? null : String(v).trim();
+      } else if(typeof v === 'number' && NUMERIC_FIELDS.includes(field)){
         // numeric already
       } else if(NUMERIC_FIELDS.includes(field)){
         v = parseFloat(v) || 0;
@@ -1696,6 +1850,7 @@ function renderImportPreview(records, monthDate, isTest){
     <div class="import-summary">
       <div class="row"><span>Month</span><span class="n">${monthLabel(monthDate)}</span></div>
       <div class="row"><span>Rows parsed</span><span class="n">${records.length}</span></div>
+      <div class="row"><span>"Last Client Invoice" column</span><span class="n">${records.some(r => 'last_client_invoice' in r) ? 'Found' : 'Not in this file'}</span></div>
       <div class="row"><span>Import type</span><span class="n">${isTest ? 'TEST DATA' : 'Real data'}</span></div>
     </div>
     <button class="btn" id="confirm-import-btn">Confirm import</button>
@@ -1723,6 +1878,8 @@ async function runImport(records, monthDate, isTest){
       total_contract_amount: rec.total_contract_amount, billed: rec.billed, spent: rec.spent,
       spend_remaining: rec.spend_remaining, bill_remaining: rec.bill_remaining, wip: rec.wip,
       active: true, is_test: isTest,
+      // Only sent when the file had the column, so a file without it never blanks existing values.
+      ...('last_client_invoice' in rec ? { last_client_invoice: rec.last_client_invoice } : {}),
     };
     const existing = existingById[rec.project_id];
     if(existing){
